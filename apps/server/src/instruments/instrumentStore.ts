@@ -1,3 +1,4 @@
+import { EventEmitter } from 'node:events';
 import type { Instrument } from '@otv/shared';
 import type { Db } from '../db';
 import { InstrumentIndex } from './search';
@@ -19,11 +20,13 @@ interface Row {
 const SYNCED_AT = 'instruments_synced_at';
 
 /** Instrument master persisted in SQLite, served from an in-memory index. */
-export class InstrumentStore {
+export class InstrumentStore extends EventEmitter<{ replaced: [] }> {
   readonly index = new InstrumentIndex();
   private syncedAt: number | null = null;
 
   constructor(private readonly db: Db) {
+    super();
+    this.setMaxListeners(50);
     const rows = db.prepare('SELECT * FROM instruments').all() as Row[];
     this.index.load(rows.map(fromRow));
     const v = db.prepare('SELECT v FROM kv WHERE k = ?').get(SYNCED_AT) as
@@ -55,6 +58,7 @@ export class InstrumentStore {
     })();
     this.index.load(instruments);
     this.syncedAt = syncedAt;
+    this.emit('replaced');
   }
 }
 

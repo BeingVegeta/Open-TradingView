@@ -25,10 +25,12 @@ interface Client {
   /** sub id → bars waiting to be sent, by time (latest state wins). */
   pending: Map<string, Map<number, Candle>>;
   /** Quote subscriptions: sub id → detail level and token → key. */
-  watches: Map<string, { detail: 'quote' | 'full'; tokens: Map<number, string> }>;
+  watches: Map<string, { detail: 'quote' | 'full'; keys: string[]; tokens: Map<number, string> }>;
   /** sub id → quotes waiting to be sent, by key (latest wins). */
   pendingQuotes: Map<string, Map<string, Quote>>;
   alive: boolean;
+  /** Re-resolves watched keys to tokens (after the instrument list changes). */
+  resolveWatches?: () => void;
 }
 
 export function liveStatus(ticker: TickerManager, clock: Clock & { speed?: number }): LiveStatus {
@@ -98,6 +100,12 @@ export async function registerClientHub(
         }
       }
     }
+  });
+
+  // A new instrument list (first sync, or the daily refresh) can resolve keys that
+  // were unknown before, and derivative tokens change: re-resolve every watch.
+  instruments.on('replaced', () => {
+    for (const c of clients) c.resolveWatches?.();
   });
 
   auth.on('change', (status) => {
@@ -172,6 +180,21 @@ export async function registerClientHub(
       pendingQuotes: new Map(),
       alive: true,
     };
+    const resolveWatch = (cl: Client, sub: string, keys: string[], detail: 'quote' | 'full') => {
+      const tokens = new Map<number, string>();
+      for (const key of keys) {
+        const inst = instruments.get(key);
+        if (inst) tokens.set(inst.token, inst.key);
+      }
+      // Release then re-acquire: the ticker batches both, so unchanged tokens cause no upstream traffic.
+      ticker.release(`watch:${cl.id}:${sub}`);
+      for (const token of tokens.keys()) ticker.acquire(`watch:${cl.id}:${sub}`, token, detail);
+      cl.watches.set(sub, { detail, keys, tokens });
+      return tokens;
+    };
+    c.resolveWatches = () => {
+      for (const [sub, w] of c.watches) resolveWatch(c, sub, w.keys, w.detail);
+    };
     const unwatch = (sub: string) => {
       ticker.release(`watch:${c.id}:${sub}`);
       c.watches.delete(sub);
@@ -201,15 +224,10 @@ export async function registerClientHub(
           });
         if (!Array.isArray(m.keys)) return;
         const detail = m.detail === 'full' ? 'full' : 'quote';
-        const tokens = new Map<number, string>();
-        for (const key of m.keys.slice(0, MAX_WATCH_KEYS)) {
-          const inst = typeof key === 'string' ? instruments.get(key) : undefined;
-          if (inst) tokens.set(inst.token, inst.key);
-        }
-        // Release then re-acquire: the ticker batches both, so unchanged tokens cause no upstream traffic.
-        ticker.release(`watch:${c.id}:${m.sub}`);
-        for (const token of tokens.keys()) ticker.acquire(`watch:${c.id}:${m.sub}`, token, detail);
-        c.watches.set(m.sub, { detail, tokens });
+        const keys = m.keys
+          .filter((k): k is string => typeof k === 'string')
+          .slice(0, MAX_WATCH_KEYS);
+        const tokens = resolveWatch(c, m.sub, keys, detail);
         // Immediate snapshot from the latest ticks we already have.
         const snap: Quote[] = [];
         for (const [token, key] of tokens) {
