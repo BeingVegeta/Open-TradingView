@@ -1,3 +1,4 @@
+import { randomBytes } from 'node:crypto';
 import { EventEmitter } from 'node:events';
 import { nextTokenExpiry, type AuthStatus, type LoggedOutReason } from '@otv/shared';
 import type { FastifyBaseLogger } from 'fastify';
@@ -7,6 +8,9 @@ import type { SessionStore, StoredSession } from './sessionStore';
 
 /** setTimeout cannot wait longer than this (~24.8 days). */
 const MAX_TIMER_MS = 2 ** 31 - 1;
+/** How long a started login may take to come back from Zerodha. */
+const LOGIN_STATE_TTL_MS = 15 * 60_000;
+const MAX_PENDING_LOGINS = 16;
 
 export interface AuthServiceOptions {
   apiKey: string;
@@ -28,6 +32,8 @@ export class AuthService extends EventEmitter<{ change: [AuthStatus] }> {
   private reason: LoggedOutReason | null = null;
   private message: string | undefined;
   private expiryTimer: NodeJS.Timeout | undefined;
+  /** Login `state` values handed out and not yet used, with their expiry. */
+  private readonly pendingStates = new Map<string, number>();
   private readonly now: () => number;
 
   constructor(private readonly opts: AuthServiceOptions) {
@@ -70,12 +76,39 @@ export class AuthService extends EventEmitter<{ change: [AuthStatus] }> {
     return this.current;
   }
 
-  loginUrl(): string {
-    return this.opts.gateway.loginUrl();
+  /** Starts a login: returns the Zerodha URL carrying a fresh one-time `state`. */
+  beginLogin(): string {
+    const now = this.now();
+    for (const [s, exp] of this.pendingStates) if (exp <= now) this.pendingStates.delete(s);
+    while (this.pendingStates.size >= MAX_PENDING_LOGINS) {
+      this.pendingStates.delete(this.pendingStates.keys().next().value!);
+    }
+    const state = randomBytes(16).toString('base64url');
+    this.pendingStates.set(state, now + LOGIN_STATE_TTL_MS);
+    return this.opts.gateway.loginUrl(state);
   }
 
-  /** Completes the redirect flow. On failure the state becomes logged_out/login_failed. */
-  async completeLogin(requestToken: string): Promise<void> {
+  /** Consumes a `state` from the callback. True only for one this server issued and that hasn't expired. */
+  private consumeState(state: string | undefined): boolean {
+    if (!state) return false;
+    const exp = this.pendingStates.get(state);
+    this.pendingStates.delete(state);
+    return exp !== undefined && exp > this.now();
+  }
+
+  /**
+   * Completes the redirect flow. Rejects callbacks whose `state` this server
+   * didn't issue (a login it didn't start). On failure the state becomes
+   * logged_out/login_failed.
+   */
+  async completeLogin(requestToken: string, state: string | undefined): Promise<void> {
+    if (!this.consumeState(state)) {
+      this.opts.log.warn('Login callback with unknown or expired state; rejecting');
+      this.loginFailed(
+        'The login response did not match a login started from this app (or it took longer than 15 minutes). Please try again.',
+      );
+      return;
+    }
     try {
       const { accessToken, user } = await this.opts.gateway.createSession(requestToken);
       const loginTime = this.now();

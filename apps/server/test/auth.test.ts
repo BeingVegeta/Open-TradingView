@@ -11,6 +11,14 @@ afterEach(async () => {
   made = undefined;
 });
 
+/** Pulls the state back out of a login URL the way Kite's redirect_params would deliver it. */
+function stateOf(loginUrl: string): string {
+  const u = new URL(loginUrl, 'http://x');
+  const direct = u.searchParams.get('state');
+  if (direct) return direct;
+  return new URLSearchParams(u.searchParams.get('redirect_params') ?? '').get('state')!;
+}
+
 async function mockLogin(m: Made) {
   const login = await m.server.inject({ url: '/api/auth/login', headers: HOST });
   expect(login.statusCode).toBe(302);
@@ -57,8 +65,9 @@ describe('auth flow (mock gateway)', () => {
     expect(cb.statusCode).toBe(302);
     expect(made.auth.status()).toMatchObject({ state: 'logged_out', reason: 'login_failed' });
 
+    const state = stateOf(made.auth.beginLogin());
     await made.server.inject({
-      url: '/api/auth/callback?status=success&request_token=bogus',
+      url: `/api/auth/callback?status=success&request_token=bogus&state=${state}`,
       headers: HOST,
     });
     expect(made.auth.status()).toMatchObject({
@@ -126,17 +135,58 @@ describe('auth flow (mock gateway)', () => {
   it('still logs out locally when upstream invalidation fails', async () => {
     const gateway: KiteGateway = {
       mode: 'live',
-      loginUrl: () => 'https://kite.zerodha.com/connect/login?v=3&api_key=k',
+      loginUrl: (state) =>
+        `https://kite.zerodha.com/connect/login?v=3&api_key=k&redirect_params=state%3D${state}`,
       createSession: async () => ({ accessToken: 't', user: { userId: 'AB1234', userName: 'A' } }),
       invalidateSession: async () => {
         throw new KiteApiError('network', 'down');
       },
+      fetchInstruments: async () => [],
+      fetchHistory: async () => [],
     };
     made = await makeApp({ gateway });
-    await made.auth.completeLogin('rt');
+    await made.auth.completeLogin('rt', stateOf(made.auth.beginLogin()));
     expect(made.auth.status().state).toBe('logged_in');
     await made.auth.logout();
     expect(made.auth.status()).toMatchObject({ state: 'logged_out', reason: null });
+  });
+});
+
+describe('login state check', () => {
+  const callback = (m: Made, query: string) =>
+    m.server.inject({
+      url: `/api/auth/callback?action=login&status=success&request_token=mock-1&${query}`,
+      headers: HOST,
+    });
+
+  it('rejects a callback without a state', async () => {
+    made = await makeApp();
+    await callback(made, '');
+    expect(made.auth.status()).toMatchObject({ state: 'logged_out', reason: 'login_failed' });
+  });
+
+  it('rejects a state this server did not issue', async () => {
+    made = await makeApp();
+    made.auth.beginLogin();
+    await callback(made, 'state=forged');
+    expect(made.auth.status()).toMatchObject({ state: 'logged_out', reason: 'login_failed' });
+  });
+
+  it('accepts an issued state once, and not after 15 minutes', async () => {
+    let now = istToEpoch(2026, 10, 12, 9, 0);
+    made = await makeApp({ now: () => now });
+    const s1 = stateOf(made.auth.beginLogin());
+    await callback(made, `state=${s1}`);
+    expect(made.auth.status().state).toBe('logged_in');
+
+    await made.auth.logout();
+    await callback(made, `state=${s1}`); // replay
+    expect(made.auth.status()).toMatchObject({ state: 'logged_out', reason: 'login_failed' });
+
+    const s2 = stateOf(made.auth.beginLogin());
+    now += 16 * 60_000;
+    await callback(made, `state=${s2}`);
+    expect(made.auth.status()).toMatchObject({ state: 'logged_out', reason: 'login_failed' });
   });
 });
 

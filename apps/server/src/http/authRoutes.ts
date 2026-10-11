@@ -6,6 +6,7 @@ import type { KiteGateway } from '../kite/gateway';
 
 interface CallbackQuery {
   request_token?: string;
+  state?: string;
   status?: string;
   action?: string;
 }
@@ -23,7 +24,8 @@ export function registerAuthRoutes(
 
   /** One click: the browser navigates here and is bounced to the Zerodha login page. */
   app.get('/api/auth/login', async (_req, reply) => {
-    return reply.redirect(auth.loginUrl(), 302);
+    reply.header('cache-control', 'no-store');
+    return reply.redirect(auth.beginLogin(), 302);
   });
 
   /**
@@ -31,7 +33,7 @@ export function registerAuthRoutes(
    * `?request_token=…&action=login&status=success`.
    */
   app.get<{ Querystring: CallbackQuery }>('/api/auth/callback', async (req, reply) => {
-    const { request_token: requestToken, status } = req.query;
+    const { request_token: requestToken, status, state } = req.query;
     if (status !== 'success' || !requestToken) {
       auth.loginFailed(
         status && status !== 'success'
@@ -39,7 +41,7 @@ export function registerAuthRoutes(
           : 'The login redirect did not include a request_token.',
       );
     } else {
-      await auth.completeLogin(requestToken);
+      await auth.completeLogin(requestToken, state);
     }
     reply.header('cache-control', 'no-store');
     return reply.redirect(`${config.appUrl}/`, 302);
@@ -52,8 +54,9 @@ export function registerAuthRoutes(
 
   if (gateway instanceof MockKiteGateway) {
     // Stands in for the Zerodha login page in mock mode.
-    app.get(MOCK_LOGIN_PATH, async (_req, reply) => {
+    app.get<{ Querystring: { state?: string } }>(MOCK_LOGIN_PATH, async (req, reply) => {
       const callback = new URL(config.redirectUrl);
+      if (req.query.state) callback.searchParams.set('state', req.query.state);
       callback.searchParams.set('action', 'login');
       callback.searchParams.set('status', 'success');
       callback.searchParams.set('request_token', gateway.newRequestToken());

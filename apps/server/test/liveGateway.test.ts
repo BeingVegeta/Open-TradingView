@@ -52,8 +52,10 @@ describe('LiveKiteGateway against a fake Kite API', () => {
   });
   afterAll(() => fake.close());
 
-  it('builds the v3 login URL', () => {
-    expect(gw().loginUrl()).toBe('https://kite.zerodha.com/connect/login?v=3&api_key=key123');
+  it('builds the v3 login URL with the state in redirect_params', () => {
+    expect(gw().loginUrl('abc_123')).toBe(
+      'https://kite.zerodha.com/connect/login?v=3&api_key=key123&redirect_params=state%3Dabc_123',
+    );
   });
 
   it('exchanges the request token with checksum = sha256(api_key + request_token + api_secret)', async () => {
