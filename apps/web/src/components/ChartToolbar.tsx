@@ -1,5 +1,6 @@
 import { instrumentKind, TIMEFRAMES, type Instrument, type TimeframeId } from '@otv/shared';
 import { useWorkspace } from '../workspace/workspaceStore';
+import { IndicatorMenu } from './IndicatorMenu';
 
 export function ChartToolbar({
   instrument,
@@ -9,6 +10,8 @@ export function ChartToolbar({
   tf: TimeframeId;
 }) {
   const setTf = useWorkspace((s) => s.setTf);
+  const layout = useWorkspace((s) => s.layout);
+  const setLayout = useWorkspace((s) => s.setLayout);
   return (
     <div className="toolbar">
       {instrument && (
@@ -35,6 +38,17 @@ export function ChartToolbar({
           </button>
         ))}
       </div>
+      <div className="toolbar-sep" />
+      <IndicatorMenu instrument={instrument} />
+      <div className="toolbar-spacer" />
+      <button
+        className={`tf-btn ${layout.sidebarOpen ? 'tf-btn-on' : ''}`}
+        onClick={() => setLayout({ sidebarOpen: !layout.sidebarOpen })}
+        title="Toggle watchlist and depth panel"
+        aria-pressed={layout.sidebarOpen}
+      >
+        ☰ Panel
+      </button>
     </div>
   );
 }

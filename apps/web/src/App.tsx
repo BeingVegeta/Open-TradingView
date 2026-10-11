@@ -1,9 +1,11 @@
 import { useEffect } from 'react';
 import { useAuth, watchAuth } from './auth/authStore';
 import { liveClient } from './live/liveClient';
+import { syncPrefs } from './workspace/workspaceStore';
 import { LoginScreen } from './components/LoginScreen';
 import { TopBar } from './components/TopBar';
 import { Workspace } from './components/Workspace';
+import { Sidebar } from './sidebar/Sidebar';
 
 export function App() {
   const status = useAuth((s) => s.status);
@@ -14,7 +16,11 @@ export function App() {
   useEffect(() => {
     if (!loggedIn) return;
     liveClient.start();
-    return () => liveClient.stop();
+    const stopPrefs = syncPrefs();
+    return () => {
+      liveClient.stop();
+      stopPrefs();
+    };
   }, [loggedIn]);
 
   if (!status) {
@@ -35,7 +41,10 @@ export function App() {
     <div className="app">
       <TopBar status={status} />
       {serverError && <div className="banner banner-warn">{serverError} Retrying…</div>}
-      <Workspace />
+      <div className="main">
+        <Workspace />
+        <Sidebar />
+      </div>
     </div>
   );
 }

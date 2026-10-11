@@ -14,7 +14,8 @@ export type PerfEvent =
       ms: number;
       added: number;
     }
-  | { type: 'edge-reached'; key: string; tf: string; whileLoading: boolean };
+  | { type: 'edge-reached'; key: string; tf: string; whileLoading: boolean }
+  | { type: 'render-cost'; bars: number; priceMs: number; indicatorsMs: number };
 
 declare global {
   interface Window {

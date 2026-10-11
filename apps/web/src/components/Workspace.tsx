@@ -10,10 +10,12 @@ function useRestoreInstrument() {
   const key = useWorkspace((s) => s.key);
   const instrument = useWorkspace((s) => s.instrument);
   const setInstrument = useWorkspace((s) => s.setInstrument);
+  const hydrated = useWorkspace((s) => s.hydrated);
   const [sync, setSync] = useState<InstrumentSyncStatus | null>(null);
 
   useEffect(() => {
-    if (instrument) return;
+    // Wait for the saved workspace so we don't load one chart and then another.
+    if (instrument || !hydrated) return;
     let stop = false;
     let timer: number | undefined;
     // The list we last looked the symbol up against. A lookup can race a sync that
@@ -48,7 +50,7 @@ function useRestoreInstrument() {
       stop = true;
       window.clearTimeout(timer);
     };
-  }, [key, instrument, setInstrument]);
+  }, [key, instrument, setInstrument, hydrated]);
 
   return { instrument, sync };
 }

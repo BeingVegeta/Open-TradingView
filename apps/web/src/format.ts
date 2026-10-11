@@ -20,3 +20,30 @@ export function formatDuration(ms: number): string {
   const m = totalMin % 60;
   return h > 0 ? `${h}h ${pad2(m)}m` : `${m}m`;
 }
+
+const fmtCache = new Map<string, Intl.NumberFormat>();
+
+/** Indian-grouped price with fixed decimals (e.g. 1,23,456.75). `signed` adds a + for positives. */
+export function formatPrice(v: number, decimals = 2, signed = false): string {
+  const k = `${decimals}`;
+  let f = fmtCache.get(k);
+  if (!f)
+    fmtCache.set(
+      k,
+      (f = new Intl.NumberFormat('en-IN', {
+        minimumFractionDigits: decimals,
+        maximumFractionDigits: decimals,
+      })),
+    );
+  const s = f.format(v);
+  return signed && v > 0 ? `+${s}` : s;
+}
+
+/** Compact Indian quantities: 12.3K, 4.56L, 1.2Cr. */
+export function formatQty(v: number): string {
+  const a = Math.abs(v);
+  if (a >= 1e7) return `${(v / 1e7).toFixed(2)}Cr`;
+  if (a >= 1e5) return `${(v / 1e5).toFixed(2)}L`;
+  if (a >= 1e3) return `${(v / 1e3).toFixed(1)}K`;
+  return String(Math.round(v));
+}

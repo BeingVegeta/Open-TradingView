@@ -1,5 +1,7 @@
 import {
+  getTimeframe,
   hasVolume,
+  instrumentKind,
   priceDecimals,
   type Candle,
   type Instrument,
@@ -14,6 +16,8 @@ import {
   type IChartApi,
   type ISeriesApi,
   type LogicalRange,
+  type MouseEventParams,
+  type Time,
 } from 'lightweight-charts';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { ApiError } from '../api';
@@ -21,7 +25,9 @@ import { liveClient } from '../live/liveClient';
 import { historyStore, type SeriesState } from '../market/historyStore';
 import { recordPerf } from '../perf';
 import { useWorkspace } from '../workspace/workspaceStore';
-import { toChartCandle, toChartTime } from './chartTime';
+import { fromChartTime, toChartCandle, toChartTime } from './chartTime';
+import { IndicatorLayer } from './indicatorLayer';
+import { Legend, type LegendData } from './Legend';
 
 const UP = '#22c55e';
 const DOWN = '#ef4444';
@@ -50,6 +56,16 @@ export function ChartView({ instrument, tf }: { instrument: Instrument; tf: Time
   const chartRef = useRef<IChartApi | null>(null);
   const candlesRef = useRef<ISeriesApi<'Candlestick'> | null>(null);
   const volumeRef = useRef<ISeriesApi<'Histogram'> | null>(null);
+  const layerRef = useRef<IndicatorLayer | null>(null);
+  /** Bar time under the crosshair (epoch s), or null for the newest bar. */
+  const hoverRef = useRef<number | null>(null);
+  const indicators = useWorkspace((s) => s.indicators);
+  const [legend, setLegend] = useState<LegendData>({
+    candle: null,
+    prev: null,
+    indicators: [],
+    hovering: false,
+  });
   /** Which series the chart currently shows, to ignore late responses for an old one. */
   const currentRef = useRef({ key: instrument.key, tf });
   const seriesId = `${instrument.key}|${tf}`;
@@ -103,17 +119,68 @@ export function ChartView({ instrument, tf }: { instrument: Instrument; tf: Time
     });
     chart.priceScale('vol').applyOptions({ scaleMargins: { top: 0.82, bottom: 0 } });
     chartRef.current = chart;
+    layerRef.current = new IndicatorLayer(chart);
     return () => {
       chart.remove();
       chartRef.current = null;
+      layerRef.current = null;
     };
   }, []);
+
+  /** Recomputes the legend for the hovered (or newest) bar of the series on screen. */
+  const refreshLegend = useCallback(() => {
+    const { key, tf: t } = currentRef.current;
+    const candles = historyStore.get(key, t)?.candles ?? [];
+    const hover = hoverRef.current;
+    let i = candles.length - 1;
+    if (hover !== null) {
+      let lo = 0;
+      let hi = candles.length - 1;
+      while (lo < hi) {
+        const mid = (lo + hi + 1) >> 1;
+        if (candles[mid]!.time <= hover) lo = mid;
+        else hi = mid - 1;
+      }
+      i = lo;
+    }
+    setLegend({
+      candle: candles[i] ?? null,
+      prev: candles[i - 1] ?? null,
+      indicators: i >= 0 && layerRef.current ? layerRef.current.valuesAt(i) : [],
+      hovering: hover !== null,
+    });
+  }, []);
+
+  // Legend follows the crosshair.
+  useEffect(() => {
+    const chart = chartRef.current;
+    if (!chart) return;
+    const onMove = (p: MouseEventParams<Time>) => {
+      hoverRef.current = p.time === undefined ? null : fromChartTime(p.time as number);
+      refreshLegend();
+    };
+    chart.subscribeCrosshairMove(onMove);
+    return () => chart.unsubscribeCrosshairMove(onMove);
+  }, [refreshLegend]);
+
+  // Indicator series follow the saved configuration.
+  const kind = instrumentKind(instrument);
+  const derivative = kind === 'future' || kind === 'option';
+  useEffect(() => {
+    const layer = layerRef.current;
+    if (!layer) return;
+    const s = historyStore.get(currentRef.current.key, currentRef.current.tf);
+    layer.build(indicators, { derivative });
+    if (s) layer.setData(s.candles);
+    refreshLegend();
+  }, [indicators, derivative, refreshLegend]);
 
   /** Pushes a series' candles into the chart. `resetView` scrolls to the newest bars. */
   const render = useCallback(
     (s: SeriesState, resetView: boolean) => {
       const chart = chartRef.current;
       if (!chart) return;
+      const t0 = performance.now();
       candlesRef.current!.setData(s.candles.map(toChartCandle));
       const withVolume = hasVolume(instrument);
       volumeRef.current!.applyOptions({ visible: withVolume });
@@ -126,6 +193,14 @@ export function ChartView({ instrument, tf }: { instrument: Instrument; tf: Time
             }))
           : [],
       );
+      const t1 = performance.now();
+      layerRef.current?.setData(s.candles);
+      recordPerf({
+        type: 'render-cost',
+        bars: s.candles.length,
+        priceMs: t1 - t0,
+        indicatorsMs: performance.now() - t1,
+      });
       // At the start of the instrument's history, don't let the view drift into empty space.
       chart.timeScale().applyOptions({ fixLeftEdge: !s.hasMore });
       if (resetView) {
@@ -136,8 +211,9 @@ export function ChartView({ instrument, tf }: { instrument: Instrument; tf: Time
       }
       const id = `${instrument.key}|${currentRef.current.tf}`;
       setStatus(s.candles.length ? { id, state: 'ready' } : { id, state: 'empty' });
+      refreshLegend();
     },
-    [instrument],
+    [instrument, refreshLegend],
   );
 
   // Price precision and time axis style follow the instrument and timeframe.
@@ -227,11 +303,14 @@ export function ChartView({ instrument, tf }: { instrument: Instrument; tf: Time
           // Only the newest bar changed or new bars started: cheap incremental update.
           // (Lightweight Charts can only update its newest bar or append.)
           const s = historyStore.get(key, tf)!;
-          for (const c of s.candles.slice(-bars.length - 1)) {
-            if (c.time < lastBefore) continue;
+          let from = s.candles.length;
+          while (from > 0 && s.candles[from - 1]!.time >= lastBefore) from--;
+          for (const c of s.candles.slice(from)) {
             candlesRef.current?.update(toChartCandle(c));
             if (withVolume) volumeRef.current?.update(volBar(c));
           }
+          layerRef.current?.update(s.candles, from);
+          if (hoverRef.current === null) refreshLegend();
         }
       },
       () => {
@@ -245,7 +324,7 @@ export function ChartView({ instrument, tf }: { instrument: Instrument; tf: Time
           .catch(() => {});
       },
     );
-  }, [live, instrument, tf, render]);
+  }, [live, instrument, tf, render, refreshLegend]);
 
   // Scroll-back: fetch older candles before the user reaches the left edge.
   useEffect(() => {
@@ -296,6 +375,9 @@ export function ChartView({ instrument, tf }: { instrument: Instrument; tf: Time
   return (
     <div className="chart-wrap">
       <div ref={containerRef} className="chart" />
+      {status.state === 'ready' && (
+        <Legend instrument={instrument} tfLabel={getTimeframe(tf)?.label ?? tf} data={legend} />
+      )}
       {status.state === 'loading' && (
         <div className="chart-overlay">
           <div className="spinner" aria-label="Loading chart" />

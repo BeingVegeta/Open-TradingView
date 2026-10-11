@@ -1,4 +1,4 @@
-import type { Candle, ClientMessage, LiveStatus, ServerMessage } from '@otv/shared';
+import type { Candle, ClientMessage, LiveStatus, Quote, ServerMessage } from '@otv/shared';
 import { create } from 'zustand';
 import { useAuth } from '../auth/authStore';
 
@@ -30,9 +30,16 @@ const SILENCE_MS = 20_000;
  * re-subscribes every chart on reconnect and asks each to re-sync its newest
  * bars (to fill whatever was missed while disconnected or asleep).
  */
+interface Watch {
+  keys: string[];
+  detail: 'quote' | 'full';
+  onQuotes: (q: Quote[]) => void;
+}
+
 class LiveClient {
   private ws: WebSocket | null = null;
   private readonly subs = new Map<string, Sub>();
+  private readonly watches = new Map<string, Watch>();
   private seq = 0;
   private attempts = 0;
   private retryTimer: number | undefined;
@@ -77,6 +84,27 @@ class LiveClient {
     this.ws?.close();
   };
 
+  /**
+   * Live quotes for a set of instruments ('full' adds depth and OI). Returns a
+   * handle to change the set or stop.
+   */
+  watch(keys: string[], detail: 'quote' | 'full', onQuotes: (q: Quote[]) => void) {
+    const sub = `w${++this.seq}`;
+    const w: Watch = { keys, detail, onQuotes };
+    this.watches.set(sub, w);
+    this.send({ type: 'watch', sub, keys, detail });
+    return {
+      update: (next: string[]) => {
+        w.keys = next;
+        this.send({ type: 'watch', sub, keys: next, detail });
+      },
+      close: () => {
+        this.watches.delete(sub);
+        this.send({ type: 'unwatch', sub });
+      },
+    };
+  }
+
   private onVisible = () => {
     if (document.visibilityState !== 'visible' || !this.wanted) return;
     // After sleep the socket may look open but be dead: check right away.
@@ -106,6 +134,8 @@ class LiveClient {
       this.attempts = 0;
       useLive.setState({ conn: 'open' });
       for (const [sub, s] of this.subs) this.send({ type: 'subscribe', sub, key: s.key, tf: s.tf });
+      for (const [sub, w] of this.watches)
+        this.send({ type: 'watch', sub, keys: w.keys, detail: w.detail });
       if (this.everOpened) for (const s of this.subs.values()) s.onResync?.();
       this.everOpened = true;
       this.armSilence();
@@ -146,6 +176,9 @@ class LiveClient {
         break;
       case 'bars':
         this.subs.get(m.sub)?.onBars(m.bars, !!m.replace);
+        break;
+      case 'quotes':
+        this.watches.get(m.sub)?.onQuotes(m.quotes);
         break;
       default:
         break;
