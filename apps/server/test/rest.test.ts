@@ -63,13 +63,11 @@ describe('KiteRestClient via LiveKiteGateway', () => {
           .send({ status: 'error', error_type: 'NetworkException', message: 'Too many requests' });
       }
       if ((req.params as { token: string }).token === '403') {
-        return reply
-          .code(403)
-          .send({
-            status: 'error',
-            error_type: 'PermissionException',
-            message: 'Insufficient permission for that call.',
-          });
+        return reply.code(403).send({
+          status: 'error',
+          error_type: 'PermissionException',
+          message: 'Insufficient permission for that call.',
+        });
       }
       return {
         status: 'success',
