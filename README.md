@@ -9,9 +9,9 @@ against your own [Zerodha Kite Connect](https://kite.trade/docs/connect/v3/) API
 - **Read-only.** The app never calls Kite's order endpoints (enforced by a lint rule).
 - **Secrets stay server-side.** The API secret and access token never reach the browser.
 
-> Status: milestone 3 of 5. Login, instrument search, historical charts and live tick-by-tick
-> updates work. Watchlist, indicators and the other terminal features come next. See
-> [Roadmap](#roadmap).
+> Status: milestone 4 of 5. Login, search, historical and live charts, watchlists, indicators,
+> market depth and saved layouts work. Polish (custom timeframes, multi-chart, drawing tools)
+> comes next. See [Roadmap](#roadmap).
 
 ## Requirements
 
@@ -61,6 +61,24 @@ page you land back in the app.
 - **Scroll back** by dragging the chart to the right; older candles load before you reach the
   edge, until the start of the instrument's history.
 - The last symbol and timeframe are restored when you reopen the app.
+
+### Terminal
+
+- **Watchlists** (right panel): live price, change and change % against the previous close.
+  Add symbols with the box at the top, drag rows to reorder, hover a row to remove it, click to
+  open its chart. Create, rename (double-click the name) and delete lists. Saved on the server.
+- **Market depth** (below the watchlist) for the chart's instrument: five bid and offer levels
+  with orders and quantities, total buy/sell quantity, day open/high/low/previous close,
+  volume, average price and last trade; open interest for futures and options. Indices have no
+  depth.
+- **Indicators** (`ƒx Indicators` in the chart toolbar): SMA, EMA, Bollinger Bands and VWAP
+  on the price chart; RSI, MACD and Open Interest (futures and options) in their own panes.
+  They update live. Click an indicator's name in the legend to change its settings or colour;
+  hover it to remove it. VWAP resets each trading day.
+- **Legend** (top-left of the chart): open, high, low, close, change and volume of the candle
+  under the crosshair (or the newest), and each indicator's values there.
+- **Layout is restored** on reload: symbol, timeframe, indicators, panel width and which panels
+  are open, saved on the server.
 
 ### Live data
 
@@ -166,19 +184,21 @@ apps/server      Fastify + SQLite (better-sqlite3): Kite session, instrument syn
                  history cache, the single upstream ticker connection, live candles
   src/kite         Kite gateway (live and mock), rate limiter, REST client, market clock
   src/ticker       Ticker connection and subscriptions, tick parser, recorder/replay
-  src/live         Live candle series, reconciliation, the browser WebSocket (/ws)
+  src/live         Live candle series, reconciliation, quotes, the browser WebSocket (/ws)
+  src/user         Watchlists and saved preferences
   src/history      Chunked, cached history
   src/instruments  Instrument store, sync and search
   src/mock         Synthetic instruments, candles and ticks; local Kite-protocol ticker
 apps/web         React + Vite UI, charts with Lightweight Charts
 packages/shared  Types and pure logic shared by both: IST time, exchange sessions,
-                 session-anchored bucketing, the candle builder, aggregation
+                 session-anchored bucketing, the candle builder, aggregation, indicators
 ```
 
 ### Data and secrets
 
 Everything local lives in `data/` (git-ignored): the SQLite database with your session, the
-instrument list and the candle cache. Deleting `data/` is safe; it is rebuilt from Kite. `.env` and recorded tick files are
+instrument list, the candle cache, your watchlists and saved layout. Deleting `data/` resets
+the app (watchlists and layout included); everything else is rebuilt from Kite. `.env` and recorded tick files are
 git-ignored too. Do not commit any of them.
 
 ### Security notes
@@ -194,7 +214,7 @@ stored unencrypted in `data/otv.sqlite`, which is created with owner-only permis
 2. ~~Instruments and history: daily instrument sync, search, chunked and cached history,
    candlestick chart with timeframes and scroll-back~~
 3. ~~Realtime: mock tick feed, ticker manager, candle builder, live chart updates~~
-4. Terminal: watchlist, indicators, OHLC legend, market depth, restored layout
+4. ~~Terminal: watchlist, indicators, OHLC legend, market depth, restored layout~~
 5. Polish: custom timeframes, multi-chart layout, drawing tools, keyboard search
 
 ## Licence and attribution
