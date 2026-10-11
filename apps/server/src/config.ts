@@ -2,6 +2,7 @@ import { existsSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import type { KiteMode } from '@otv/shared';
+import { parseRangeCaps, type RangeCaps } from './history/rangeCaps';
 
 export const REPO_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../..');
 
@@ -21,6 +22,10 @@ export interface Config {
   /** Directory with the built web app, served when it exists. */
   webDistDir: string;
   logLevel: string;
+  /** Max days per historical request, per interval. */
+  historyCaps: RangeCaps;
+  /** Mock mode: simulated latency of each Kite REST call. */
+  mockLatencyMs: number;
 }
 
 export class ConfigError extends Error {}
@@ -83,5 +88,13 @@ export function readConfig(env: NodeJS.ProcessEnv = process.env): Config {
     dataDir: path.resolve(REPO_ROOT, env.DATA_DIR?.trim() || 'data'),
     webDistDir: path.join(REPO_ROOT, 'apps/web/dist'),
     logLevel: env.LOG_LEVEL?.trim() || 'info',
+    historyCaps: (() => {
+      try {
+        return parseRangeCaps(env.KITE_HISTORY_MAX_DAYS);
+      } catch (e) {
+        throw new ConfigError((e as Error).message);
+      }
+    })(),
+    mockLatencyMs: Number(env.MOCK_LATENCY_MS ?? 150) || 0,
   };
 }

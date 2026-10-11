@@ -22,6 +22,47 @@ const MIGRATIONS: string[] = [
      login_time    INTEGER NOT NULL,
      expires_at    INTEGER NOT NULL
    );`,
+  // 2: instrument master, key/value metadata and the candle cache.
+  `CREATE TABLE instruments (
+     key             TEXT PRIMARY KEY,
+     token           INTEGER NOT NULL,
+     exchange        TEXT NOT NULL,
+     tradingsymbol   TEXT NOT NULL,
+     name            TEXT NOT NULL,
+     segment         TEXT NOT NULL,
+     instrument_type TEXT NOT NULL,
+     expiry          TEXT,
+     strike          REAL NOT NULL,
+     tick_size       REAL NOT NULL,
+     lot_size        INTEGER NOT NULL
+   ) WITHOUT ROWID;
+   CREATE TABLE kv (k TEXT PRIMARY KEY, v TEXT NOT NULL) WITHOUT ROWID;
+   -- Candles are keyed by EXCHANGE:TRADINGSYMBOL, never by the reusable numeric token.
+   CREATE TABLE candles (
+     ikey     TEXT    NOT NULL,
+     interval TEXT    NOT NULL,
+     t        INTEGER NOT NULL,
+     o REAL NOT NULL, h REAL NOT NULL, l REAL NOT NULL, c REAL NOT NULL,
+     v INTEGER NOT NULL,
+     oi INTEGER,
+     PRIMARY KEY (ikey, interval, t)
+   ) WITHOUT ROWID;
+   -- Time ranges [from_t, to_t) known to be completely cached (settled data only).
+   CREATE TABLE candle_coverage (
+     ikey     TEXT    NOT NULL,
+     interval TEXT    NOT NULL,
+     from_t   INTEGER NOT NULL,
+     to_t     INTEGER NOT NULL,
+     PRIMARY KEY (ikey, interval, from_t)
+   ) WITHOUT ROWID;
+   -- Per cached series: the token it was fetched with, and where its data begins if known.
+   CREATE TABLE candle_series (
+     ikey       TEXT    NOT NULL,
+     interval   TEXT    NOT NULL,
+     token      INTEGER NOT NULL,
+     data_start INTEGER,
+     PRIMARY KEY (ikey, interval)
+   ) WITHOUT ROWID;`,
 ];
 
 export function migrate(db: Db): void {
