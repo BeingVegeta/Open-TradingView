@@ -43,6 +43,17 @@ export function estimateSpanDays(exchange: string, interval: KiteInterval, bars:
   return Math.ceil(tradingDays * (7 / 5) * 1.15) + 3;
 }
 
+/**
+ * Start of a chunk reaching back `spanDays` from `to`, aligned down to 00:00 IST
+ * (no candle straddles midnight, so a chunk can never cut a candle in half)
+ * and kept within the cap.
+ */
+export function chunkStart(to: number, spanDays: number, capDays: number): number {
+  let from = istStartOfDay((to - spanDays * DAY_S) * 1000) / 1000;
+  while (to - from > capDays * DAY_S) from += DAY_S;
+  return from;
+}
+
 interface Tail {
   from: number;
   fetchedAt: number;
@@ -104,6 +115,43 @@ export class HistoryService {
     const out: Candle[][] = [];
     let count = 0;
 
+    // 0. Cold start: one request for recent settled history and today together,
+    //    instead of two (requests are the scarce resource at 3/s).
+    if (cursor > settled && !this.tailFresh(inst.key, interval, settled)) {
+      const cov = this.deps.cache.coverage(inst.key, interval);
+      if (!rangeEndingAt(cov, settled)) {
+        const span = Math.min(
+          this.caps[interval],
+          estimateSpanDays(inst.exchange, interval, limit),
+        );
+        const from = Math.max(
+          chunkStart(nowS + 1, span, this.caps[interval]),
+          coveredEndBefore(cov, settled),
+          HISTORY_FLOOR,
+        );
+        if (from < settled) {
+          const fetched = await this.fetchChunk(
+            accessToken,
+            inst,
+            interval,
+            { from, to: nowS + 1 },
+            opts,
+          );
+          this.deps.cache.storeRange(
+            inst.key,
+            interval,
+            { from, to: settled },
+            fetched.filter((c) => c.time < settled),
+          );
+          this.tails.set(`${inst.key}|${interval}`, {
+            from: settled,
+            fetchedAt: this.now(),
+            candles: fetched.filter((c) => c.time >= settled),
+          });
+        }
+      }
+    }
+
     // 1. Today's tail.
     if (cursor > settled) {
       const tail = await this.getTail(accessToken, inst, interval, settled, opts);
@@ -144,7 +192,11 @@ export class HistoryService {
             ? Math.min(cap, Math.max(spanDays * 2, 1))
             : Math.min(cap, estimateSpanDays(inst.exchange, interval, limit - count));
         // Fill only up to the end of the previous covered range (don't refetch it).
-        segFrom = Math.max(cursor - spanDays * DAY_S, coveredEndBefore(cov, cursor), HISTORY_FLOOR);
+        segFrom = Math.max(
+          chunkStart(cursor, spanDays, cap),
+          coveredEndBefore(cov, cursor),
+          HISTORY_FLOOR,
+        );
         const range: Range = { from: segFrom, to: cursor };
         const candles = await this.fetchChunk(accessToken, inst, interval, range, opts);
         fetches++;
@@ -225,6 +277,11 @@ export class HistoryService {
     for (const k of this.tails.keys()) if (k.startsWith(ikey + '|')) this.tails.delete(k);
   }
 
+  private tailFresh(ikey: string, interval: KiteInterval, settled: number): boolean {
+    const t = this.tails.get(`${ikey}|${interval}`);
+    return !!t && t.from === settled && this.now() - t.fetchedAt < this.tailTtlMs;
+  }
+
   private async getTail(
     accessToken: string,
     inst: Instrument,
@@ -233,8 +290,7 @@ export class HistoryService {
     opts: RequestOpts,
   ): Promise<Tail & { reset?: boolean }> {
     const k = `${inst.key}|${interval}`;
-    const t = this.tails.get(k);
-    if (t && t.from === settled && this.now() - t.fetchedAt < this.tailTtlMs) return t;
+    if (this.tailFresh(inst.key, interval, settled)) return this.tails.get(k)!;
     let p = this.inflightTails.get(k);
     if (!p) {
       p = this.fetchTail(accessToken, inst, interval, settled, opts).finally(() =>
@@ -308,7 +364,7 @@ export class HistoryService {
   ): Promise<Candle[]> {
     const capS = this.caps[interval] * DAY_S;
     if (range.to - range.from > capS) {
-      const mid = range.to - capS;
+      const mid = chunkStart(range.to, this.caps[interval], this.caps[interval]);
       const older = await this.fetchChunk(
         accessToken,
         inst,

@@ -224,6 +224,16 @@ describe('HistoryService', () => {
       expect(r.to - r.from).toBeLessThanOrEqual(20 * DAY);
   });
 
+  it('produces identical candles when Kite forces smaller chunks (no partial candles at chunk edges)', async () => {
+    const tight = setup({ gatewayCaps: { ...DEFAULT_RANGE_CAPS, '15minute': 7 } });
+    const normal = setup();
+    const a = await scrollAll(tight, 'NSE:HDFCBANK', '15m', 1500, 3);
+    const b = await scrollAll(normal, 'NSE:HDFCBANK', '15m', 1500, 3);
+    // Tight caps return fewer bars per call (bounded upstream requests); compare the overlap.
+    expect(a.all.length).toBeGreaterThan(1500);
+    expect(a.all).toEqual(b.all.filter((c) => c.time >= a.all[0]!.time));
+  });
+
   it('returns candles since a time for refreshing the live edge', async () => {
     const s = setup();
     const inst = s.inst('NSE:AXISBANK');
@@ -241,5 +251,22 @@ describe('HistoryService', () => {
     const res = await s.svc.getBefore('t', s.inst('NSE:NIFTY 50'), tf('1m'), { limit: 50 });
     expect(res.candles).toHaveLength(50);
     expect(res.candles.every((c) => c.volume === 0)).toBe(true);
+  });
+});
+
+describe('HistoryService request economy', () => {
+  it('opens a chart with a single upstream request when the cache is cold', async () => {
+    const s = setup();
+    for (const [key, id] of [
+      ['NSE:RELIANCE', '5m'],
+      ['NSE:RELIANCE', '15m'],
+      ['NSE:INFY', '1h'],
+      ['NSE:INFY', '1D'],
+    ] as const) {
+      const before = s.gateway.calls.history;
+      const res = await s.svc.getBefore('t', s.inst(key), tf(id), { limit: 1000 });
+      expect(res.candles).toHaveLength(1000);
+      expect(s.gateway.calls.history - before).toBe(1);
+    }
   });
 });
