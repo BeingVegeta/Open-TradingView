@@ -12,6 +12,9 @@ import { HistoryService } from './history/historyService';
 import { registerAuthRoutes } from './http/authRoutes';
 import { registerGuards } from './http/guards';
 import { registerMarketRoutes } from './http/marketRoutes';
+import { registerUserRoutes } from './http/userRoutes';
+import { PrefsStore } from './user/prefsStore';
+import { WatchlistStore } from './user/watchlistStore';
 import { InstrumentStore } from './instruments/instrumentStore';
 import { InstrumentSync } from './instruments/instrumentSync';
 import { registerClientHub } from './live/clientHub';
@@ -109,7 +112,15 @@ export async function buildApp(deps: AppDeps): Promise<App> {
   server.get('/api/health', async () => ({ ok: true, mode: gateway.mode }));
   registerAuthRoutes(server, { config, auth, gateway });
   registerMarketRoutes(server, { auth, instruments, sync, history });
-  await registerClientHub(server, { auth, ticker, live, clock: marketClock, isAllowedOrigin });
+  registerUserRoutes(server, { watchlists: new WatchlistStore(db), prefs: new PrefsStore(db) });
+  await registerClientHub(server, {
+    auth,
+    ticker,
+    live,
+    instruments,
+    clock: marketClock,
+    isAllowedOrigin,
+  });
   if (gateway.mode === 'mock' && 'dropTickerConnections' in gateway) {
     // Development aids for exercising recovery paths in mock mode.
     const mock = gateway as unknown as { dropTickerConnections(): void; expireAllTokens(): void };

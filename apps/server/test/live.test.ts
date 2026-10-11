@@ -157,6 +157,45 @@ describe('live candles over /ws (mock market at 30x)', { timeout: 30_000 }, () =
     await until(() => c.msgs.some((x) => x.type === 'auth' && x.auth.state === 'logged_out'));
   });
 
+  it('streams watchlist quotes with change vs previous close, and depth + OI in full detail', async () => {
+    const { wsUrl, m } = await setup();
+    const c = connect(wsUrl);
+    await c.open;
+    const fut = [...m.instruments.index.search('nifty fut', { limit: 1 })][0]!.key;
+    c.ws.send(
+      JSON.stringify({
+        type: 'watch',
+        sub: 'wl',
+        keys: ['NSE:INFY', 'NSE:NIFTY 50', 'NSE:DOESNOTEXIST'],
+        detail: 'quote',
+      }),
+    );
+    c.ws.send(JSON.stringify({ type: 'watch', sub: 'depth', keys: [fut], detail: 'full' }));
+    const quotes = (sub: string) =>
+      c.msgs.flatMap((x) => (x.type === 'quotes' && x.sub === sub ? x.quotes : []));
+    await until(
+      () =>
+        new Set(quotes('wl').map((q) => q.key)).size === 2 && quotes('depth').some((q) => q.depth),
+    );
+    const infy = quotes('wl')
+      .filter((q) => q.key === 'NSE:INFY')
+      .at(-1)!;
+    expect(infy.prevClose).toBeGreaterThan(0);
+    expect(infy.change).toBeCloseTo(infy.lastPrice - infy.prevClose!, 6);
+    expect(infy.depth).toBeUndefined();
+    const d = quotes('depth')
+      .filter((q) => q.depth)
+      .at(-1)!;
+    expect(d.depth!.buy).toHaveLength(5);
+    expect(d.oi).toBeGreaterThan(0);
+    // Upstream mode is the richest requested: the future is in full mode.
+    expect(m.ticker.desired().get(m.instruments.get(fut)!.token)).toBe('full');
+    expect(m.ticker.desired().get(m.instruments.get('NSE:INFY')!.token)).toBe('quote');
+
+    c.ws.send(JSON.stringify({ type: 'unwatch', sub: 'wl' }));
+    await until(() => !m.ticker.desired().has(m.instruments.get('NSE:INFY')!.token));
+  });
+
   it('releases the upstream subscription when the last viewer leaves', async () => {
     const { wsUrl, m } = await setup();
     const c = connect(wsUrl);

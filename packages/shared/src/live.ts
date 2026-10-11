@@ -1,5 +1,6 @@
 import type { AuthStatus } from './auth';
 import type { Candle } from './market';
+import type { Quote } from './watchlist';
 
 export type UpstreamState = 'idle' | 'connecting' | 'connected' | 'reconnecting' | 'stopped';
 
@@ -19,6 +20,9 @@ export interface LiveStatus {
 export type ClientMessage =
   | { type: 'subscribe'; sub: string; key: string; tf: string }
   | { type: 'unsubscribe'; sub: string }
+  /** Live quotes for a set of instruments: 'quote' for watchlists, 'full' adds market depth and OI. */
+  | { type: 'watch'; sub: string; keys: string[]; detail: 'quote' | 'full' }
+  | { type: 'unwatch'; sub: string }
   | { type: 'ping' };
 
 /** Server → browser messages on /ws. */
@@ -32,5 +36,7 @@ export type ServerMessage =
    * (reconciled with Kite's history) and overwrite what the client holds.
    */
   | { type: 'bars'; sub: string; bars: Candle[]; replace?: boolean }
+  /** Changed quotes since the last push (coalesced, ~4 per second). */
+  | { type: 'quotes'; sub: string; quotes: Quote[] }
   | { type: 'error'; sub?: string; error: string; message: string }
   | { type: 'pong' };

@@ -1,15 +1,20 @@
 import { randomUUID } from 'node:crypto';
 import websocket from '@fastify/websocket';
-import type { Candle, ClientMessage, LiveStatus, ServerMessage } from '@otv/shared';
+import type { Candle, ClientMessage, LiveStatus, Quote, ServerMessage } from '@otv/shared';
 import type { FastifyInstance } from 'fastify';
 import type { WebSocket } from 'ws';
 import type { AuthService } from '../auth/authService';
+import type { InstrumentStore } from '../instruments/instrumentStore';
 import type { Clock } from '../kite/clock';
 import type { TickerManager } from '../ticker/tickerManager';
 import type { LiveCandles } from './liveCandles';
+import { tickToQuote } from './quotes';
 
 /** Pushes per chart are coalesced to at most one per this interval (~6–7 per second). */
 export const FLUSH_MS = 150;
+/** Watchlist/depth quotes are pushed at most this often (~4 per second). */
+export const QUOTE_FLUSH_MS = 250;
+const MAX_WATCH_KEYS = 500;
 const PING_MS = 15_000;
 
 interface Client {
@@ -19,6 +24,10 @@ interface Client {
   subs: Map<string, string>;
   /** sub id → bars waiting to be sent, by time (latest state wins). */
   pending: Map<string, Map<number, Candle>>;
+  /** Quote subscriptions: sub id → detail level and token → key. */
+  watches: Map<string, { detail: 'quote' | 'full'; tokens: Map<number, string> }>;
+  /** sub id → quotes waiting to be sent, by key (latest wins). */
+  pendingQuotes: Map<string, Map<string, Quote>>;
   alive: boolean;
 }
 
@@ -44,11 +53,12 @@ export async function registerClientHub(
     auth: AuthService;
     ticker: TickerManager;
     live: LiveCandles;
+    instruments: InstrumentStore;
     clock: Clock & { speed?: number };
     isAllowedOrigin: (origin: string | undefined) => boolean;
   },
 ): Promise<void> {
-  const { auth, ticker, live, clock } = deps;
+  const { auth, ticker, live, clock, instruments } = deps;
   const clients = new Set<Client>();
   const send = (c: Client, m: ServerMessage) => {
     if (c.ws.readyState === c.ws.OPEN) c.ws.send(JSON.stringify(m));
@@ -70,6 +80,22 @@ export async function registerClientHub(
         let p = c.pending.get(sub);
         if (!p) c.pending.set(sub, (p = new Map()));
         for (const b of e.bars) p.set(b.time, b);
+      }
+    }
+  });
+
+  ticker.on('ticks', (ticks) => {
+    for (const c of clients) {
+      for (const [sub, w] of c.watches) {
+        for (const t of ticks) {
+          const key = w.tokens.get(t.token);
+          if (!key) continue;
+          let p = c.pendingQuotes.get(sub);
+          if (!p) c.pendingQuotes.set(sub, (p = new Map()));
+          // Merge so a quote-mode tick doesn't erase depth from an earlier full tick.
+          const merged = ticker.lastTick(t.token) ?? t;
+          p.set(key, tickToQuote(key, merged, w.detail));
+        }
       }
     }
   });
@@ -98,6 +124,15 @@ export async function registerClientHub(
       }
     }
   }, FLUSH_MS);
+  const quoteFlush = setInterval(() => {
+    for (const c of clients) {
+      for (const [sub, p] of c.pendingQuotes) {
+        if (!p.size) continue;
+        send(c, { type: 'quotes', sub, quotes: [...p.values()] });
+        p.clear();
+      }
+    }
+  }, QUOTE_FLUSH_MS);
   // Also lets the client see that ticks are flowing (lastTickAt) without a message per tick.
   const statusTick = setInterval(() => {
     const st = liveStatus(ticker, clock);
@@ -113,9 +148,10 @@ export async function registerClientHub(
       c.ws.ping();
     }
   }, PING_MS);
-  for (const t of [flush, statusTick, pinger]) t.unref();
+  for (const t of [flush, quoteFlush, statusTick, pinger]) t.unref();
   app.addHook('onClose', async () => {
     clearInterval(flush);
+    clearInterval(quoteFlush);
     clearInterval(statusTick);
     clearInterval(pinger);
     for (const c of clients) c.ws.terminate();
@@ -127,7 +163,20 @@ export async function registerClientHub(
       ws.close(1008, 'forbidden origin');
       return;
     }
-    const c: Client = { id: randomUUID(), ws, subs: new Map(), pending: new Map(), alive: true };
+    const c: Client = {
+      id: randomUUID(),
+      ws,
+      subs: new Map(),
+      pending: new Map(),
+      watches: new Map(),
+      pendingQuotes: new Map(),
+      alive: true,
+    };
+    const unwatch = (sub: string) => {
+      ticker.release(`watch:${c.id}:${sub}`);
+      c.watches.delete(sub);
+      c.pendingQuotes.delete(sub);
+    };
     clients.add(c);
     send(c, { type: 'hello', auth: auth.status(), live: liveStatus(ticker, clock) });
 
@@ -141,6 +190,35 @@ export async function registerClientHub(
         return;
       }
       if (m.type === 'ping') return send(c, { type: 'pong' });
+      if (m.type === 'unwatch') return unwatch(m.sub);
+      if (m.type === 'watch') {
+        if (!auth.session())
+          return send(c, {
+            type: 'error',
+            sub: m.sub,
+            error: 'logged_out',
+            message: 'Not logged in',
+          });
+        if (!Array.isArray(m.keys)) return;
+        const detail = m.detail === 'full' ? 'full' : 'quote';
+        const tokens = new Map<number, string>();
+        for (const key of m.keys.slice(0, MAX_WATCH_KEYS)) {
+          const inst = typeof key === 'string' ? instruments.get(key) : undefined;
+          if (inst) tokens.set(inst.token, inst.key);
+        }
+        // Release then re-acquire: the ticker batches both, so unchanged tokens cause no upstream traffic.
+        ticker.release(`watch:${c.id}:${m.sub}`);
+        for (const token of tokens.keys()) ticker.acquire(`watch:${c.id}:${m.sub}`, token, detail);
+        c.watches.set(m.sub, { detail, tokens });
+        // Immediate snapshot from the latest ticks we already have.
+        const snap: Quote[] = [];
+        for (const [token, key] of tokens) {
+          const t = ticker.lastTick(token);
+          if (t) snap.push(tickToQuote(key, t, detail));
+        }
+        if (snap.length) send(c, { type: 'quotes', sub: m.sub, quotes: snap });
+        return;
+      }
       if (m.type === 'unsubscribe') {
         const series = c.subs.get(m.sub);
         if (series) live.release(series, `${c.id}:${m.sub}`);
@@ -176,6 +254,7 @@ export async function registerClientHub(
     ws.on('close', () => {
       clients.delete(c);
       for (const [sub, series] of c.subs) live.release(series, `${c.id}:${sub}`);
+      for (const sub of [...c.watches.keys()]) unwatch(sub);
     });
   });
 }

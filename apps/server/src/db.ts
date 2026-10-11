@@ -63,6 +63,18 @@ const MIGRATIONS: string[] = [
      data_start INTEGER,
      PRIMARY KEY (ikey, interval)
    ) WITHOUT ROWID;`,
+  // 3: watchlists.
+  `CREATE TABLE watchlists (
+     id       INTEGER PRIMARY KEY,
+     name     TEXT    NOT NULL,
+     position INTEGER NOT NULL
+   );
+   CREATE TABLE watchlist_items (
+     watchlist_id INTEGER NOT NULL REFERENCES watchlists(id) ON DELETE CASCADE,
+     ikey         TEXT    NOT NULL,
+     position     INTEGER NOT NULL,
+     PRIMARY KEY (watchlist_id, ikey)
+   ) WITHOUT ROWID;`,
 ];
 
 export function migrate(db: Db): void {
