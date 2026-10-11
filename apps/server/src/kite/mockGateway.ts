@@ -42,7 +42,9 @@ export class MockKiteGateway implements KiteGateway {
   private readonly emulateRateLimit: boolean;
   private universe: Map<string, MockInstrument> | undefined;
   private byToken: Map<number, MockInstrument> | undefined;
-  private readonly issuedTokens = new Set<string>();
+  private readonly revokedTokens = new Set<string>();
+  /** Tokens issued before this (epoch ms) are dead, as after the 06:00 IST flush. */
+  private expiredBefore = 0;
   private ticker: LocalTickerServer | null = null;
   private readonly clock: Clock & { speed?: number };
   /** Upstream-side record of history request times, to emulate Kite's own 429s. */
@@ -76,8 +78,8 @@ export class MockKiteGateway implements KiteGateway {
     if (!requestToken.startsWith(MOCK_REQUEST_TOKEN_PREFIX)) {
       throw new KiteApiError('token', 'Token is invalid or has expired.', 'TokenException', 403);
     }
-    const accessToken = 'mock-access-' + randomBytes(8).toString('hex');
-    this.issuedTokens.add(accessToken);
+    // The issue time is part of the token, so sessions restored after a restart stay valid.
+    const accessToken = `mock-access-${Date.now()}-${randomBytes(6).toString('hex')}`;
     return {
       accessToken,
       user: { userId: 'MK0001', userName: 'Mock Trader', userShortname: 'Mock', broker: 'MOCK' },
@@ -85,12 +87,17 @@ export class MockKiteGateway implements KiteGateway {
   }
 
   async invalidateSession(accessToken: string): Promise<void> {
-    this.issuedTokens.delete(accessToken);
+    this.revokedTokens.add(accessToken);
   }
 
-  /** Test hook: every issued token stops working, as at 06:00 IST. */
+  /** Test/dev hook: every token issued so far stops working, as at 06:00 IST. */
   expireAllTokens(): void {
-    this.issuedTokens.clear();
+    this.expiredBefore = Date.now() + 1;
+  }
+
+  private isValidToken(token: string): boolean {
+    const m = /^mock-access-(\d+)-/.exec(token);
+    return !!m && Number(m[1]) >= this.expiredBefore && !this.revokedTokens.has(token);
   }
 
   async start(): Promise<void> {
@@ -99,7 +106,7 @@ export class MockKiteGateway implements KiteGateway {
     this.ticker = new LocalTickerServer({
       producer: synthetic,
       clock: this.clock,
-      isValid: (_apiKey, token) => this.issuedTokens.has(token),
+      isValid: (_apiKey, token) => this.isValidToken(token),
     });
     await this.ticker.listen();
   }

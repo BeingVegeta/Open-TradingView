@@ -136,7 +136,7 @@ export class TickerConnection {
         this.opts.log.warn('Kite ticker refused the access token (403); stopping');
         this.running = false;
         this.update({ state: 'stopped', error: 'Kite rejected the access token' });
-        this.opts.onTokenRejected?.('Kite ticker rejected the access token (403).');
+        this.opts.onTokenRejected?.('the live-data connection was refused (HTTP 403)');
         return;
       }
       this.opts.log.warn({ code }, 'Kite ticker handshake failed');

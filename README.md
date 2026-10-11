@@ -9,8 +9,9 @@ against your own [Zerodha Kite Connect](https://kite.trade/docs/connect/v3/) API
 - **Read-only.** The app never calls Kite's order endpoints (enforced by a lint rule).
 - **Secrets stay server-side.** The API secret and access token never reach the browser.
 
-> Status: milestone 2 of 5. Login, instrument search and historical candlestick charts work;
-> live tick updates come next. See [Roadmap](#roadmap).
+> Status: milestone 3 of 5. Login, instrument search, historical charts and live tick-by-tick
+> updates work. Watchlist, indicators and the other terminal features come next. See
+> [Roadmap](#roadmap).
 
 ## Requirements
 
@@ -61,6 +62,34 @@ page you land back in the app.
   edge, until the start of the instrument's history.
 - The last symbol and timeframe are restored when you reopen the app.
 
+### Live data
+
+While the market is open, the chart's last candle moves with every tick and new candles appear
+as each period starts, on every timeframe.
+
+- The server holds **one** connection to Kite's live feed and shares it between all browser
+  tabs; your browser only talks to the local server. Chart updates are sent about 6–7 times a
+  second.
+- Candles start at the session open (NSE 09:15, MCX and currency 09:00). Pre-open and
+  after-close ticks never create candles; the pre-open auction volume counts towards the first
+  candle of the day. A candle's volume is the change in Kite's cumulative day volume.
+- Live candles are approximations (Kite sends throttled snapshots, not every trade). About 10
+  seconds after each candle closes, and after any reconnect, the app re-fetches the recent
+  candles from Kite and replaces its own, so network drops leave no gaps or duplicates.
+- The status pill in the top bar shows **Live**, **Market closed**, **Pre-open**,
+  **Reconnecting** (Kite connection dropped; retries with backoff), **Offline** (lost the local
+  server; reconnects by itself) or **No ticks** (in session but nothing arriving, e.g. a
+  holiday — holidays aren't known to the app).
+- A laptop waking from sleep reconnects and fills in what it missed. At 06:00 IST, or if Kite
+  refuses the token, live data stops and the login screen appears.
+
+To record live ticks for later replay (useful for testing on weekends), set `TICKS_RECORD=1`.
+Raw frames go to `data/recordings/ticks-YYYY-MM-DD.jsonl`, which is git-ignored: never share
+or commit them (Zerodha's terms forbid redistributing market data). Replay one with
+`TICKS_REPLAY=data/recordings/ticks-2026-10-12.jsonl` (and optionally `REPLAY_SPEED=10`): the
+server streams the recording instead of Kite's live feed and runs its clock from the recording;
+history still comes from Kite, so you need to be logged in.
+
 ### Instruments and history
 
 - The instrument list (every tradable instrument, from Kite's daily dump) is downloaded after
@@ -103,6 +132,19 @@ currency futures) with deterministic synthetic history, and behaves like Kite wh
 range caps, the 3/s history limit, holidays, a recently listed stock (`NEWLISTCO`) and
 simulated latency (`MOCK_LATENCY_MS`, default 150 ms).
 
+Mock mode also streams live ticks through a local server that speaks Kite's ticker protocol,
+so the real connection, parser, candle builder and reconnect code all run. The ticks follow
+the mock history exactly, so live candles can be checked against it. To see the market moving
+on a weekend or at night:
+
+```sh
+MOCK_MARKET_OPEN=1 MOCK_SPEED=10 pnpm dev:mock         # last trading day, 11:00 IST, 10x speed
+MOCK_START="2026-10-09 09:13" MOCK_SPEED=10 pnpm dev:mock  # watch the pre-open and the open
+```
+
+`curl -X POST -H 'content-type: application/json' -d '{}' http://127.0.0.1:8787/api/dev/drop-ticker`
+simulates a dropped Kite connection, and `/api/dev/expire-token` the 06:00 expiry (mock mode only).
+
 ## Development
 
 ```sh
@@ -121,14 +163,16 @@ and never depend on the machine's timezone.
 
 ```
 apps/server      Fastify + SQLite (better-sqlite3): Kite session, instrument sync and search,
-                 history cache; later the single upstream ticker connection
-  src/kite         Kite gateway (live and mock), rate limiter, REST client
+                 history cache, the single upstream ticker connection, live candles
+  src/kite         Kite gateway (live and mock), rate limiter, REST client, market clock
+  src/ticker       Ticker connection and subscriptions, tick parser, recorder/replay
+  src/live         Live candle series, reconciliation, the browser WebSocket (/ws)
   src/history      Chunked, cached history
   src/instruments  Instrument store, sync and search
-  src/mock         Synthetic instruments and candles for KITE_MODE=mock
+  src/mock         Synthetic instruments, candles and ticks; local Kite-protocol ticker
 apps/web         React + Vite UI, charts with Lightweight Charts
 packages/shared  Types and pure logic shared by both: IST time, exchange sessions,
-                 session-anchored candle bucketing and aggregation
+                 session-anchored bucketing, the candle builder, aggregation
 ```
 
 ### Data and secrets
@@ -149,7 +193,7 @@ stored unencrypted in `data/otv.sqlite`, which is created with owner-only permis
 1. ~~Skeleton and auth~~
 2. ~~Instruments and history: daily instrument sync, search, chunked and cached history,
    candlestick chart with timeframes and scroll-back~~
-3. Realtime: mock tick feed, ticker manager, candle builder, live chart updates
+3. ~~Realtime: mock tick feed, ticker manager, candle builder, live chart updates~~
 4. Terminal: watchlist, indicators, OHLC legend, market depth, restored layout
 5. Polish: custom timeframes, multi-chart layout, drawing tools, keyboard search
 
