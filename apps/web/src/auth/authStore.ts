@@ -1,6 +1,6 @@
 import type { AuthStatus } from '@otv/shared';
 import { create } from 'zustand';
-import { api, ApiError } from '../api';
+import { api, ApiError, setLoggedOutHandler } from '../api';
 
 interface AuthState {
   status: AuthStatus | null;
@@ -39,6 +39,7 @@ export function startLogin(): void {
  */
 export function watchAuth(): () => void {
   const { refresh } = useAuth.getState();
+  setLoggedOutHandler(() => void refresh());
   void refresh();
 
   const onVisible = () => {
