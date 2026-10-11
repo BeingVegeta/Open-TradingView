@@ -1,4 +1,10 @@
-import { hasVolume, priceDecimals, type Instrument, type TimeframeId } from '@otv/shared';
+import {
+  hasVolume,
+  priceDecimals,
+  type Candle,
+  type Instrument,
+  type TimeframeId,
+} from '@otv/shared';
 import {
   CandlestickSeries,
   ColorType,
@@ -11,6 +17,7 @@ import {
 } from 'lightweight-charts';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { ApiError } from '../api';
+import { liveClient } from '../live/liveClient';
 import { historyStore, type SeriesState } from '../market/historyStore';
 import { recordPerf } from '../perf';
 import { useWorkspace } from '../workspace/workspaceStore';
@@ -51,6 +58,8 @@ export function ChartView({ instrument, tf }: { instrument: Instrument; tf: Time
   const status: Status =
     storedStatus.id === seriesId ? storedStatus : { id: seriesId, state: 'loading' };
   const [retry, setRetry] = useState(0);
+  /** The series id whose history is on screen (live updates start after it loads). */
+  const [loadedId, setLoadedId] = useState('');
 
   // Create the chart once.
   useEffect(() => {
@@ -151,6 +160,7 @@ export function ChartView({ instrument, tf }: { instrument: Instrument; tf: Time
 
     const done = async (s: SeriesState, wasCached: boolean) => {
       render(s, true);
+      setLoadedId(`${key}|${tf}`);
       await nextFrame();
       recordPerf({
         type: 'series-render',
@@ -192,6 +202,50 @@ export function ChartView({ instrument, tf }: { instrument: Instrument; tf: Time
       cancelled = true;
     };
   }, [instrument.key, tf, render, retry]);
+
+  // Live updates for the series on screen.
+  const live = loadedId === seriesId;
+  useEffect(() => {
+    if (!live) return;
+    const key = instrument.key;
+    const withVolume = hasVolume(instrument);
+    const volBar = (c: Candle) => ({
+      time: toChartTime(c.time),
+      value: c.volume,
+      color: c.close >= c.open ? UP_VOL : DOWN_VOL,
+    });
+    return liveClient.subscribe(
+      key,
+      tf,
+      (bars) => {
+        const lastBefore = historyStore.get(key, tf)?.candles.at(-1)?.time ?? -Infinity;
+        const change = historyStore.applyBars(key, tf, bars);
+        if (change === 'all') {
+          const s = historyStore.get(key, tf);
+          if (s) render(s, false);
+        } else if (change === 'tail') {
+          // Only the newest bar changed or new bars started: cheap incremental update.
+          // (Lightweight Charts can only update its newest bar or append.)
+          const s = historyStore.get(key, tf)!;
+          for (const c of s.candles.slice(-bars.length - 1)) {
+            if (c.time < lastBefore) continue;
+            candlesRef.current?.update(toChartCandle(c));
+            if (withVolume) volumeRef.current?.update(volBar(c));
+          }
+        }
+      },
+      () => {
+        // Reconnected after a gap: fetch whatever we missed.
+        historyStore
+          .refreshTail(key, tf)
+          .then((s) => {
+            if (s) render(s, false);
+            else setRetry((n) => n + 1);
+          })
+          .catch(() => {});
+      },
+    );
+  }, [live, instrument, tf, render]);
 
   // Scroll-back: fetch older candles before the user reaches the left edge.
   useEffect(() => {

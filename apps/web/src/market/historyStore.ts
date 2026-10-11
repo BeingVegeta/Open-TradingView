@@ -111,6 +111,46 @@ class HistoryStore {
     return cur;
   }
 
+  /**
+   * Merges bars pushed by the server. Live updates touch the newest bars;
+   * replacements (reconciled with Kite) may fix older ones or fill a gap.
+   * Returns 'tail' if only the last bar changed or bars were appended, 'all'
+   * if earlier bars changed, or null if nothing changed.
+   */
+  applyBars(key: string, tf: string, bars: Candle[]): 'tail' | 'all' | null {
+    const s = this.series.get(HistoryStore.id(key, tf));
+    if (!s || !bars.length) return null;
+    const c = s.candles;
+    let result: 'tail' | 'all' | null = null;
+    for (const b of [...bars].sort((x, y) => x.time - y.time)) {
+      const last = c.at(-1);
+      if (!last || b.time > last.time) {
+        c.push(b);
+        result ??= 'tail';
+      } else if (b.time === last.time) {
+        if (!sameBar(last, b)) {
+          c[c.length - 1] = b;
+          result ??= 'tail';
+        }
+      } else if (b.time >= c[0]!.time) {
+        // Binary search for an older bar (reconciliation, or a gap being filled).
+        let lo = 0;
+        let hi = c.length - 1;
+        while (lo < hi) {
+          const mid = (lo + hi) >> 1;
+          if (c[mid]!.time < b.time) lo = mid + 1;
+          else hi = mid;
+        }
+        if (c[lo]!.time === b.time) {
+          if (sameBar(c[lo]!, b)) continue;
+          c[lo] = b;
+        } else c.splice(lo, 0, b);
+        result = 'all';
+      }
+    }
+    return result;
+  }
+
   private put(id: string, s: SeriesState): SeriesState {
     this.series.set(id, s);
     while (this.series.size > MAX_SERIES) this.series.delete(this.series.keys().next().value!);
@@ -119,3 +159,19 @@ class HistoryStore {
 }
 
 export const historyStore = new HistoryStore();
+
+if (import.meta.env.DEV) {
+  // Inspection hook for development and browser tests.
+  (window as unknown as { __otvHistory: HistoryStore }).__otvHistory = historyStore;
+}
+
+function sameBar(a: Candle, b: Candle): boolean {
+  return (
+    a.open === b.open &&
+    a.high === b.high &&
+    a.low === b.low &&
+    a.close === b.close &&
+    a.volume === b.volume &&
+    a.oi === b.oi
+  );
+}

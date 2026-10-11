@@ -1,5 +1,6 @@
 import { useEffect } from 'react';
 import { useAuth, watchAuth } from './auth/authStore';
+import { liveClient } from './live/liveClient';
 import { LoginScreen } from './components/LoginScreen';
 import { TopBar } from './components/TopBar';
 import { Workspace } from './components/Workspace';
@@ -9,6 +10,12 @@ export function App() {
   const serverError = useAuth((s) => s.serverError);
 
   useEffect(() => watchAuth(), []);
+  const loggedIn = status?.state === 'logged_in';
+  useEffect(() => {
+    if (!loggedIn) return;
+    liveClient.start();
+    return () => liveClient.stop();
+  }, [loggedIn]);
 
   if (!status) {
     return (

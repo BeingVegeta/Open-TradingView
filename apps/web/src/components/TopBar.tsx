@@ -4,6 +4,7 @@ import { useAuth } from '../auth/authStore';
 import { APP_NAME } from '../brand';
 import { formatDuration, formatIstShort } from '../format';
 import { Logo } from './Logo';
+import { LiveStatusPill } from './LiveStatusPill';
 import { SymbolSearch } from './SymbolSearch';
 
 type LoggedIn = Extract<AuthStatus, { state: 'logged_in' }>;
@@ -31,6 +32,7 @@ export function TopBar({ status }: { status: LoggedIn }) {
       </div>
       <SymbolSearch />
       <div className="topbar-spacer" />
+      <LiveStatusPill mock={status.mode === 'mock'} />
       {status.mode === 'mock' && (
         <span className="badge badge-mock" title="KITE_MODE=mock: synthetic data">
           MOCK DATA

@@ -42,6 +42,8 @@ export function SymbolSearch() {
   const [results, setResults] = useState<Instrument[]>([]);
   const [sync, setSync] = useState<InstrumentSyncStatus | null>(null);
   const [active, setActive] = useState(0);
+  /** Bumped to re-run the search while the instrument list is still downloading. */
+  const [retry, setRetry] = useState(0);
 
   // "/" focuses search from anywhere (except while typing in a field).
   useEffect(() => {
@@ -60,6 +62,7 @@ export function SymbolSearch() {
   useEffect(() => {
     if (!open) return;
     const ac = new AbortController();
+    let retryTimer: number | undefined;
     const t = window.setTimeout(() => {
       api
         .get<InstrumentSearchResponse>(
@@ -70,14 +73,17 @@ export function SymbolSearch() {
           setResults(r.results);
           setSync(r.sync);
           setActive(0);
+          if (r.sync.count === 0 && !r.sync.error)
+            retryTimer = window.setTimeout(() => setRetry((n) => n + 1), 1000);
         })
         .catch(() => {});
     }, 60);
     return () => {
       window.clearTimeout(t);
+      window.clearTimeout(retryTimer);
       ac.abort();
     };
-  }, [query, filter, open]);
+  }, [query, filter, open, retry]);
 
   const choose = (i: Instrument) => {
     setInstrument(i);

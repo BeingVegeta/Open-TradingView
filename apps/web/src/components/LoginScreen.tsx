@@ -15,7 +15,7 @@ function reasonText(s: LoggedOut): { tone: 'info' | 'warn'; text: string } | nul
     case 'token_rejected':
       return {
         tone: 'warn',
-        text: `Kite ended the session early${s.message ? ` (${s.message})` : ''}. This happens after a logout from Kite web or a new login elsewhere with this API key.`,
+        text: `Kite ended the session early${s.message ? `: ${s.message.replace(/\.$/, '')}` : ''}. This happens after logging out of Kite web, logging in to another Kite app, or the daily 06:00 IST expiry.`,
       };
     case 'login_failed':
       return { tone: 'warn', text: `Login didn't complete: ${s.message ?? 'unknown error'}` };

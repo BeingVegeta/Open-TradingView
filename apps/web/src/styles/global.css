@@ -443,3 +443,59 @@ button {
   text-align: right;
   font-weight: 600;
 }
+
+/* Live status */
+.live-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 10px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+.live-clock {
+  font-family: var(--font-mono);
+  font-weight: 400;
+}
+.live-ok {
+  color: var(--up);
+}
+.live-warn {
+  color: var(--warn);
+  border-color: rgba(245, 158, 11, 0.4);
+}
+.live-bad {
+  color: var(--down);
+  border-color: rgba(239, 68, 68, 0.4);
+}
+.live-idle {
+  color: var(--text-muted);
+}
+.dot-idle {
+  background: var(--text-faint);
+}
+.dot-warn {
+  background: var(--warn);
+}
+.dot-bad {
+  background: var(--down);
+}
+.dot-ok {
+  background: var(--up);
+  box-shadow: 0 0 0 0 rgba(34, 197, 94, 0.6);
+  animation: pulse 1.6s infinite;
+}
+@keyframes pulse {
+  0% {
+    box-shadow: 0 0 0 0 rgba(34, 197, 94, 0.55);
+  }
+  70% {
+    box-shadow: 0 0 0 6px rgba(34, 197, 94, 0);
+  }
+  100% {
+    box-shadow: 0 0 0 0 rgba(34, 197, 94, 0);
+  }
+}
