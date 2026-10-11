@@ -16,6 +16,9 @@ function useRestoreInstrument() {
     if (instrument) return;
     let stop = false;
     let timer: number | undefined;
+    // The list we last looked the symbol up against. A lookup can race a sync that
+    // finishes a moment later, so retry once whenever the list has changed since.
+    let seenSyncedAt: number | null | undefined;
     const attempt = async () => {
       for (const k of key === DEFAULT_SYMBOL ? [key] : [key, DEFAULT_SYMBOL]) {
         try {
@@ -32,7 +35,13 @@ function useRestoreInstrument() {
       const s = await api.get<InstrumentSyncStatus>('/api/instruments/status').catch(() => null);
       if (stop) return;
       setSync(s);
-      if (s && (s.syncing || s.count === 0)) timer = window.setTimeout(attempt, 1500);
+      if (!s) return;
+      if (s.syncing || s.count === 0) {
+        timer = window.setTimeout(attempt, 1500);
+      } else if (s.syncedAt !== seenSyncedAt) {
+        seenSyncedAt = s.syncedAt;
+        void attempt();
+      }
     };
     void attempt();
     return () => {

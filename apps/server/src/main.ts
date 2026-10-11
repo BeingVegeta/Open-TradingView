@@ -44,6 +44,6 @@ process.once('SIGTERM', () => void shutdown('SIGTERM'));
 await server.listen({ host: config.host, port: config.port });
 sync.start();
 server.log.info(
-  `Open-TradingView server (${config.mode} mode) on http://${config.host}:${config.port} — ` +
+  `Open-TradingView server (${config.mode} mode) on http://${config.host}:${config.port}, ` +
     `Kite redirect URL: ${config.redirectUrl}`,
 );
