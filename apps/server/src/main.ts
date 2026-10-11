@@ -1,7 +1,7 @@
 import path from 'node:path';
 import { buildApp } from './app';
 import { ConfigError, isLoopbackHost, loadDotEnv, readConfig } from './config';
-import { openDb } from './db';
+import { claimDataMode, openDb } from './db';
 import type { KiteGateway } from './kite/gateway';
 import { LiveKiteGateway } from './kite/liveGateway';
 import { MarketClock, marketOpenStart } from './kite/marketClock';
@@ -24,6 +24,11 @@ try {
 }
 
 const db = openDb(config.dataDir);
+if (claimDataMode(db, config.mode)) {
+  console.warn(
+    `Data in ${config.dataDir} came from the other mode; cleared cached instruments, candles and session.`,
+  );
+}
 let gateway: KiteGateway;
 let marketClock: MarketClock;
 let recorder: TickRecorder | null = null;

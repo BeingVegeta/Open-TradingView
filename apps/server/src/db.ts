@@ -106,3 +106,25 @@ export function openDb(dataDir: string | ':memory:'): Db {
   migrate(db);
   return db;
 }
+
+/**
+ * Records which mode (live/mock) filled this database's market data. If it was
+ * filled in the other mode, the instrument list, candle cache and session are
+ * dropped (watchlists and layout are kept), so synthetic candles can never be
+ * shown as real ones or vice versa. Returns true if anything was cleared.
+ */
+export function claimDataMode(db: Db, mode: string): boolean {
+  const row = db.prepare("SELECT v FROM kv WHERE k = 'data_mode'").get() as
+    { v: string } | undefined;
+  let cleared = false;
+  if (row && row.v !== mode) {
+    db.transaction(() => {
+      for (const t of ['instruments', 'candles', 'candle_coverage', 'candle_series', 'session'])
+        db.prepare(`DELETE FROM ${t}`).run();
+      db.prepare("DELETE FROM kv WHERE k = 'instruments_synced_at'").run();
+    })();
+    cleared = true;
+  }
+  db.prepare("INSERT OR REPLACE INTO kv (k, v) VALUES ('data_mode', ?)").run(mode);
+  return cleared;
+}

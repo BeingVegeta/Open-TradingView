@@ -96,7 +96,11 @@ export function readConfig(env: NodeJS.ProcessEnv = process.env): Config {
       /\/+$/,
       '',
     ),
-    dataDir: path.resolve(REPO_ROOT, env.DATA_DIR?.trim() || 'data'),
+    // Mock data never shares a database with real market data.
+    dataDir: path.resolve(
+      REPO_ROOT,
+      env.DATA_DIR?.trim() || (mode === 'mock' ? 'data/mock' : 'data'),
+    ),
     webDistDir: path.join(REPO_ROOT, 'apps/web/dist'),
     logLevel: env.LOG_LEVEL?.trim() || 'info',
     historyCaps: (() => {

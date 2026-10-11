@@ -143,7 +143,9 @@ token, so one manual login per day is unavoidable. The app treats this as a norm
 pnpm dev:mock     # or set KITE_MODE=mock in .env
 ```
 
-Mock mode replaces Kite with a local fake behind the same interface. It is how the test suite
+Mock mode keeps its data in `data/mock/`, separate from real data in `data/`, so you can switch
+back and forth freely (you log in again after switching). Mock mode replaces Kite with a local
+fake behind the same interface. It is how the test suite
 runs and how to work on the app evenings and weekends when the market is closed. It serves a
 small instrument universe (NSE/BSE stocks and indices, NFO futures and options, MCX and
 currency futures) with deterministic synthetic history, and behaves like Kite where it matters:
