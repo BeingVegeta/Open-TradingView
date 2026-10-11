@@ -46,7 +46,7 @@ describe('runtime mode switching', () => {
       body: JSON.stringify({ mode: 'live' }),
     });
     expect(r.status).toBe(400);
-    expect((await r.json()).message).toMatch(/KITE_API_KEY/);
+    expect(((await r.json()) as { message: string }).message).toMatch(/KITE_API_KEY/);
   });
 
   it('switches mock → live → mock on the same port, each with its own data', async () => {
