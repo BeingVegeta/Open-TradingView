@@ -1,5 +1,6 @@
 import { existsSync } from 'node:fs';
 import fastifyStatic from '@fastify/static';
+import type { ModeInfo, ModeSwitchRequest } from '@otv/shared';
 import Fastify, { type FastifyInstance, type FastifyServerOptions } from 'fastify';
 import { AuthService } from './auth/authService';
 import { SessionStore } from './auth/sessionStore';
@@ -35,6 +36,12 @@ export interface AppDeps {
   /** Ticker reconnect backoff floor (tests). */
   tickerBackoffMs?: number;
   reconcileDelayMs?: number;
+  /** Lets the UI switch between live and mock data (see Runtime). */
+  modeControl?: {
+    info: () => ModeInfo;
+    check: (req: ModeSwitchRequest) => string | null;
+    request: (req: ModeSwitchRequest) => void;
+  };
 }
 
 export interface App {
@@ -110,6 +117,29 @@ export async function buildApp(deps: AppDeps): Promise<App> {
   server.addHook('onClose', async () => ticker.stop());
 
   server.get('/api/health', async () => ({ ok: true, mode: gateway.mode }));
+  server.get(
+    '/api/mode',
+    async (): Promise<ModeInfo> =>
+      deps.modeControl?.info() ?? {
+        mode: gateway.mode,
+        liveAvailable: gateway.mode === 'live',
+        mock: null,
+      },
+  );
+  server.post<{ Body: Partial<ModeSwitchRequest> }>('/api/mode', async (req, reply) => {
+    const ctl = deps.modeControl;
+    if (!ctl)
+      return reply
+        .code(501)
+        .send({ error: 'not_supported', message: 'Mode switching is not available' });
+    const body: ModeSwitchRequest = { mode: req.body?.mode as ModeSwitchRequest['mode'] };
+    if (typeof req.body?.marketOpen === 'boolean') body.marketOpen = req.body.marketOpen;
+    if (typeof req.body?.speed === 'number') body.speed = req.body.speed;
+    const err = ctl.check(body);
+    if (err) return reply.code(400).send({ error: 'bad_request', message: err });
+    ctl.request(body);
+    return { ok: true, restarting: true };
+  });
   registerAuthRoutes(server, { config, auth, gateway });
   registerMarketRoutes(server, { auth, instruments, sync, history });
   registerUserRoutes(server, { watchlists: new WatchlistStore(db), prefs: new PrefsStore(db) });

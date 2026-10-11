@@ -2,6 +2,7 @@ import type { AuthStatus } from '@otv/shared';
 import { startLogin } from '../auth/authStore';
 import { APP_NAME } from '../brand';
 import { Logo } from './Logo';
+import { ModeSwitch } from './ModeSwitch';
 
 type LoggedOut = Extract<AuthStatus, { state: 'logged_out' }>;
 
@@ -53,6 +54,7 @@ export function LoginScreen({ status }: { status: LoggedOut }) {
           Read-only: this app never places orders. Your API secret and access token stay on this
           machine's server and are never sent to the browser.
         </p>
+        <ModeSwitch variant="link" />
       </div>
     </main>
   );

@@ -36,3 +36,20 @@ export type AuthStatus =
       /** Human-readable detail for `login_failed` / `token_rejected`. */
       message?: string;
     };
+
+/** Which data source the server is running on, and what the UI may switch to. */
+export interface ModeInfo {
+  mode: KiteMode;
+  /** True when KITE_API_KEY and KITE_API_SECRET are configured. */
+  liveAvailable: boolean;
+  /** Mock market settings (mock mode only). */
+  mock: { marketOpen: boolean; speed: number } | null;
+}
+
+export interface ModeSwitchRequest {
+  mode: KiteMode;
+  /** Mock: start "as if the market is open" (default true). */
+  marketOpen?: boolean;
+  /** Mock: market clock speed (default 1). */
+  speed?: number;
+}

@@ -137,6 +137,18 @@ token, so one manual login per day is unavoidable. The app treats this as a norm
   again.
 - **Log out** in the top bar invalidates the token with Kite and clears it locally.
 
+### Switching between live and mock data
+
+Click the **LIVE DATA / MOCK DATA** button in the top bar (or "Use mock data instead…" on the
+login screen) and pick a source. For mock data you can choose to start "as if the market is
+open" and a speed. The local server restarts itself in that mode and the page reloads. Each
+mode keeps its own data, so your live session survives a trip to mock mode and back (until
+06:00 IST as usual).
+
+The switch lasts until you stop the server: `pnpm start` always starts in the mode set in `.env`
+(`KITE_MODE`), so the app never opens on simulated data by surprise. Live mode is only offered
+when `KITE_API_KEY` and `KITE_API_SECRET` are set.
+
 ### Mock mode (no Zerodha account needed)
 
 ```sh
