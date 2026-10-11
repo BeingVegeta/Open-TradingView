@@ -242,11 +242,13 @@ export class HistoryService {
     inst: Instrument,
     tf: Timeframe,
     since: number,
-    opts: RequestOpts = {},
+    opts: RequestOpts & { fresh?: boolean } = {},
   ): Promise<HistoryResponse> {
     const interval = tf.interval;
     let reset = this.checkToken(inst, interval);
     const settled = istStartOfDay(this.now()) / 1000;
+    // Live reconciliation needs Kite's current view, not a cached tail.
+    if (opts.fresh) this.tails.delete(`${inst.key}|${interval}`);
     const tail = await this.getTail(accessToken, inst, interval, settled, opts);
     if (tail.reset) reset = true;
     let candles = tail.candles.filter((c) => c.time >= since);

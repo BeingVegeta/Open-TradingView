@@ -1,7 +1,6 @@
+import { buildApp, type AppDeps } from '../src/app';
 import { readConfig, type Config } from '../src/config';
 import { openDb } from '../src/db';
-import { buildApp } from '../src/app';
-import type { KiteGateway } from '../src/kite/gateway';
 import { MockKiteGateway } from '../src/kite/mockGateway';
 
 export function testConfig(overrides: Record<string, string> = {}): Config {
@@ -11,24 +10,11 @@ export function testConfig(overrides: Record<string, string> = {}): Config {
   };
 }
 
-export async function makeApp(
-  opts: {
-    gateway?: KiteGateway;
-    now?: () => number;
-    config?: Config;
-    db?: ReturnType<typeof openDb>;
-  } = {},
-) {
+export async function makeApp(opts: Partial<AppDeps> = {}) {
   const config = opts.config ?? testConfig();
   const db = opts.db ?? openDb(':memory:');
   const gateway = opts.gateway ?? new MockKiteGateway();
-  const app = await buildApp({
-    config,
-    db,
-    gateway,
-    logger: false,
-    ...(opts.now ? { now: opts.now } : {}),
-  });
+  const app = await buildApp({ logger: false, ...opts, config, db, gateway });
   return { ...app, db, config, gateway };
 }
 

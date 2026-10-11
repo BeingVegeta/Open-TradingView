@@ -18,7 +18,10 @@ function hostnameOf(hostHeader: string): string {
  *   without a CORS preflight, which this server never approves) and, when the
  *   browser sends an Origin, it must be one of ours.
  */
-export function registerGuards(app: FastifyInstance, config: Config): void {
+export function registerGuards(
+  app: FastifyInstance,
+  config: Config,
+): { isAllowedOrigin: (origin: string | undefined) => boolean } {
   const allowed = new Set<string>([config.host]);
   for (const u of [config.appUrl, config.redirectUrl])
     allowed.add(new URL(u).hostname.replace(/^\[|\]$/g, ''));
@@ -40,4 +43,10 @@ export function registerGuards(app: FastifyInstance, config: Config): void {
       return reply.code(415).send({ error: 'json_required' });
     }
   });
+
+  return {
+    /** For WebSocket upgrades, which browsers don't protect with CORS: an Origin is required. */
+    isAllowedOrigin: (origin) =>
+      !!origin && origin !== 'null' && isAllowed(hostnameOf(origin.replace(/^[a-z]+:\/\//i, ''))),
+  };
 }

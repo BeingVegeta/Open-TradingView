@@ -3,6 +3,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import type { KiteMode } from '@otv/shared';
 import { parseRangeCaps, type RangeCaps } from './history/rangeCaps';
+import { parseIst } from './kite/marketClock';
 
 export const REPO_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../..');
 
@@ -26,6 +27,16 @@ export interface Config {
   historyCaps: RangeCaps;
   /** Mock mode: simulated latency of each Kite REST call. */
   mockLatencyMs: number;
+  /** Mock mode: start the market clock here (epoch ms) instead of now. */
+  mockStart: number | null;
+  /** Mock mode: start "as if the market is open" (if it isn't). */
+  mockMarketOpen: boolean;
+  /** Mock/replay: market clock speed multiplier. */
+  mockSpeed: number;
+  /** Live mode: record raw ticker frames to data/recordings/. */
+  recordTicks: boolean;
+  /** Live mode: replay this recording instead of connecting to Kite's ticker. */
+  replayFile: string | null;
 }
 
 export class ConfigError extends Error {}
@@ -96,5 +107,22 @@ export function readConfig(env: NodeJS.ProcessEnv = process.env): Config {
       }
     })(),
     mockLatencyMs: Number(env.MOCK_LATENCY_MS ?? 150) || 0,
+    mockStart: (() => {
+      const v = env.MOCK_START?.trim();
+      if (!v) return null;
+      const t = parseIst(v);
+      if (t === null)
+        throw new ConfigError(`MOCK_START must be "YYYY-MM-DD HH:MM" (IST), got "${v}".`);
+      return t;
+    })(),
+    mockMarketOpen: /^(1|true|yes)$/i.test(env.MOCK_MARKET_OPEN?.trim() ?? ''),
+    mockSpeed: (() => {
+      const v = Number(env.MOCK_SPEED ?? env.REPLAY_SPEED ?? 1);
+      if (!(v > 0 && v <= 600))
+        throw new ConfigError('MOCK_SPEED / REPLAY_SPEED must be between 0 and 600.');
+      return v;
+    })(),
+    recordTicks: /^(1|true|yes)$/i.test(env.TICKS_RECORD?.trim() ?? ''),
+    replayFile: env.TICKS_REPLAY?.trim() ? path.resolve(REPO_ROOT, env.TICKS_REPLAY.trim()) : null,
   };
 }

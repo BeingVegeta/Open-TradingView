@@ -1,10 +1,8 @@
-import type { Tick, TickMode } from '@otv/shared';
+import type { Tick, TickMode, UpstreamState } from '@otv/shared';
 import type { FastifyBaseLogger } from 'fastify';
 import WebSocket from 'ws';
 import { systemClock, type Clock } from '../kite/clock';
 import { parseTickFrame, toArrayBuffer } from './tickParser';
-
-export type UpstreamState = 'idle' | 'connecting' | 'connected' | 'reconnecting' | 'stopped';
 
 export interface UpstreamStatus {
   state: UpstreamState;
