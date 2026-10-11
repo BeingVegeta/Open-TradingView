@@ -2,6 +2,9 @@ import { randomBytes } from 'node:crypto';
 import { aggregateCandles, INTERVAL_BAR, type Candle, type Instrument } from '@otv/shared';
 import { DEFAULT_RANGE_CAPS, type RangeCaps } from '../history/rangeCaps';
 import { mockInstruments, type MockInstrument } from '../mock/instruments';
+import { LocalTickerServer } from '../mock/localTickerServer';
+import { SyntheticTicks } from '../mock/syntheticTicks';
+import type { Clock } from './clock';
 import { dayCandles, minuteCandles } from '../mock/synth';
 import { KiteApiError } from './errors';
 import type { HistoryRequest, KiteGateway, NewSession, RequestOpts } from './gateway';
@@ -14,6 +17,8 @@ export interface MockGatewayOptions {
   /** Simulated network latency per REST call. */
   latencyMs?: number;
   now?: () => number;
+  /** Market clock (may start "as if the market is open" and run fast); also drives ticks. */
+  clock?: Clock & { speed?: number };
   caps?: RangeCaps;
   limiter?: RateLimiter;
   /** Answer with 429 when history is called more than 3 times a second, like Kite. Default true. */
@@ -36,6 +41,10 @@ export class MockKiteGateway implements KiteGateway {
   private readonly limiter: RateLimiter;
   private readonly emulateRateLimit: boolean;
   private universe: Map<string, MockInstrument> | undefined;
+  private byToken: Map<number, MockInstrument> | undefined;
+  private readonly issuedTokens = new Set<string>();
+  private ticker: LocalTickerServer | null = null;
+  private readonly clock: Clock & { speed?: number };
   /** Upstream-side record of history request times, to emulate Kite's own 429s. */
   private readonly historyHits: number[] = [];
   /** Calls made, for tests and diagnostics. */
@@ -44,7 +53,12 @@ export class MockKiteGateway implements KiteGateway {
 
   constructor(opts: MockGatewayOptions = {}) {
     this.latencyMs = opts.latencyMs ?? 0;
-    this.now = opts.now ?? Date.now;
+    this.clock = opts.clock ?? {
+      now: Date.now,
+      setTimeout: (f, ms) => setTimeout(f, ms),
+      clearTimeout: (h) => clearTimeout(h as NodeJS.Timeout),
+    };
+    this.now = opts.now ?? (() => this.clock.now());
     this.caps = opts.caps ?? DEFAULT_RANGE_CAPS;
     this.limiter = opts.limiter ?? new RateLimiter();
     this.emulateRateLimit = opts.emulateRateLimit ?? true;
@@ -62,13 +76,58 @@ export class MockKiteGateway implements KiteGateway {
     if (!requestToken.startsWith(MOCK_REQUEST_TOKEN_PREFIX)) {
       throw new KiteApiError('token', 'Token is invalid or has expired.', 'TokenException', 403);
     }
+    const accessToken = 'mock-access-' + randomBytes(8).toString('hex');
+    this.issuedTokens.add(accessToken);
     return {
-      accessToken: 'mock-access-' + randomBytes(8).toString('hex'),
+      accessToken,
       user: { userId: 'MK0001', userName: 'Mock Trader', userShortname: 'Mock', broker: 'MOCK' },
     };
   }
 
-  async invalidateSession(): Promise<void> {}
+  async invalidateSession(accessToken: string): Promise<void> {
+    this.issuedTokens.delete(accessToken);
+  }
+
+  /** Test hook: every issued token stops working, as at 06:00 IST. */
+  expireAllTokens(): void {
+    this.issuedTokens.clear();
+  }
+
+  async start(): Promise<void> {
+    if (this.ticker) return;
+    const synthetic = new SyntheticTicks(() => this.tokens());
+    this.ticker = new LocalTickerServer({
+      producer: synthetic,
+      clock: this.clock,
+      isValid: (_apiKey, token) => this.issuedTokens.has(token),
+    });
+    await this.ticker.listen();
+  }
+
+  async close(): Promise<void> {
+    await this.ticker?.close();
+    this.ticker = null;
+  }
+
+  tickerUrl(accessToken: string): string {
+    if (!this.ticker) throw new Error('MockKiteGateway.start() has not been called');
+    return this.ticker.url('mock_api_key', accessToken);
+  }
+
+  /** Test/dev hook: drop all ticker connections as if the network failed. */
+  dropTickerConnections(): void {
+    this.ticker?.dropAll();
+  }
+
+  private tokens(): Map<number, MockInstrument> {
+    if (!this.byToken) this.loadUniverse();
+    return this.byToken!;
+  }
+
+  private loadUniverse(): void {
+    this.universe = new Map(mockInstruments(this.now()).map((m) => [m.instrument.key, m]));
+    this.byToken = new Map([...this.universe.values()].map((m) => [m.instrument.token, m]));
+  }
 
   async fetchInstruments(_accessToken: string, opts?: RequestOpts): Promise<Instrument[]> {
     return this.limiter.run(
@@ -76,8 +135,8 @@ export class MockKiteGateway implements KiteGateway {
       async () => {
         await this.delay(this.latencyMs * 3);
         this.calls.instruments++;
-        this.universe = new Map(mockInstruments(this.now()).map((m) => [m.instrument.key, m]));
-        return [...this.universe.values()].map((m) => m.instrument);
+        this.loadUniverse();
+        return [...this.universe!.values()].map((m) => m.instrument);
       },
       opts,
     );
@@ -128,10 +187,8 @@ export class MockKiteGateway implements KiteGateway {
   }
 
   private lookup(i: Instrument): MockInstrument | undefined {
-    if (!this.universe) {
-      this.universe = new Map(mockInstruments(this.now()).map((m) => [m.instrument.key, m]));
-    }
-    const m = this.universe.get(i.key);
+    if (!this.universe) this.loadUniverse();
+    const m = this.universe!.get(i.key);
     return m && m.instrument.token === i.token ? m : undefined;
   }
 

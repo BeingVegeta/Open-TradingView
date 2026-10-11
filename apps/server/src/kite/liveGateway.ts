@@ -8,6 +8,7 @@ import { RateLimiter } from './rateLimiter';
 import { KITE_API_ROOT, KiteRestClient } from './rest';
 
 export const KITE_LOGIN_URL = 'https://kite.zerodha.com/connect/login';
+export const KITE_TICKER_URL = 'wss://ws.kite.trade';
 
 export class LiveKiteGateway implements KiteGateway {
   readonly mode = 'live' as const;
@@ -37,6 +38,14 @@ export class LiveKiteGateway implements KiteGateway {
     // Kite appends these (URL-encoded query string) to the redirect URL as-is.
     url.searchParams.set('redirect_params', new URLSearchParams({ state }).toString());
     return url.toString();
+  }
+
+  /** Replaces the ticker endpoint (tick replay serves a local Kite-protocol server). */
+  tickerOverride: ((accessToken: string) => string) | null = null;
+
+  tickerUrl(accessToken: string): string {
+    if (this.tickerOverride) return this.tickerOverride(accessToken);
+    return `${KITE_TICKER_URL}?${new URLSearchParams({ api_key: this.config.apiKey, access_token: accessToken })}`;
   }
 
   async createSession(requestToken: string): Promise<NewSession> {

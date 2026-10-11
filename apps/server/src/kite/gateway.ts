@@ -42,4 +42,9 @@ export interface KiteGateway {
   fetchInstruments(accessToken: string, opts?: RequestOpts): Promise<Instrument[]>;
   /** Candles with open time in [from, to), ascending. The range must fit the interval's cap. */
   fetchHistory(accessToken: string, req: HistoryRequest, opts?: RequestOpts): Promise<Candle[]>;
+  /** WebSocket URL of the ticker for an access token. */
+  tickerUrl(accessToken: string): string;
+  /** Starts local resources (mock/replay ticker server). */
+  start?(): Promise<void>;
+  close?(): Promise<void>;
 }

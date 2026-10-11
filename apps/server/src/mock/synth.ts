@@ -45,7 +45,7 @@ export function isMockTradingDay(dayStartMs: number): boolean {
 }
 
 const EPOCH_DAY0 = Date.UTC(2000, 0, 1) - 330 * 60_000;
-const dayIndex = (dayStartMs: number) => Math.round((dayStartMs - EPOCH_DAY0) / DAY_MS);
+export const dayIndex = (dayStartMs: number) => Math.round((dayStartMs - EPOCH_DAY0) / DAY_MS);
 
 function level(spec: SynthSpec, day: number): number {
   return spec.basePrice * Math.exp(spec.dailyVol * 0.55 * walkNoise(spec.seed, day));
@@ -129,6 +129,13 @@ export function dayCandles(spec: SynthSpec, fromMs: number, toMs: number, nowMs:
   return out;
 }
 
+/** Shares matched in the 09:00–09:08 pre-open auction (NSE/BSE cash market only). */
+export function preOpenVolume(spec: SynthSpec, dayIndexOrStart: number): number {
+  if (spec.volumePerMinute <= 0 || (spec.exchange !== 'NSE' && spec.exchange !== 'BSE')) return 0;
+  const d = dayIndexOrStart > 1e9 ? dayIndex(dayIndexOrStart) : dayIndexOrStart;
+  return Math.round(spec.volumePerMinute * 6 * (0.5 + rand01(spec.seed, d, 4242)));
+}
+
 /** One-minute candles in [fromMs, toMs), excluding minutes that start after `nowMs`. */
 export function minuteCandles(
   spec: SynthSpec,
@@ -165,7 +172,9 @@ export function minuteCandles(
         spec.volumePerMinute > 0
           ? Math.round(spec.volumePerMinute * shape * Math.exp(0.6 * gauss(spec.seed, d, i, 9)))
           : 0;
-      const candle: Candle = { time: t / 1000, open: o, high: h, low: l, close: c, volume };
+      // Kite folds the pre-open auction volume into the day's first candle (assumed; verify live).
+      const v = i === 0 ? volume + preOpenVolume(spec, d) : volume;
+      const candle: Candle = { time: t / 1000, open: o, high: h, low: l, close: c, volume: v };
       if (spec.oiBase > 0) {
         candle.oi = Math.round(
           spec.oiBase *

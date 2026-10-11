@@ -143,6 +143,7 @@ describe('auth flow (mock gateway)', () => {
       },
       fetchInstruments: async () => [],
       fetchHistory: async () => [],
+      tickerUrl: () => 'ws://127.0.0.1:1',
     };
     made = await makeApp({ gateway });
     await made.auth.completeLogin('rt', stateOf(made.auth.beginLogin()));

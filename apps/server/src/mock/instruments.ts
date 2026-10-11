@@ -94,9 +94,23 @@ function monthlyExpiries(nowMs: number, count: number, weekday = 2): number[] {
   return out;
 }
 
-function tokenFor(key: string): number {
-  // Stable, Kite-like 6-8 digit tokens.
-  return 100_000 + (stringSeed(key) % 9_000_000);
+/** Kite's segment codes, carried in the low byte of every instrument token. */
+const SEGMENT_CODE: Record<string, number> = {
+  NSE: 1,
+  NFO: 2,
+  CDS: 3,
+  BSE: 4,
+  BFO: 5,
+  BCD: 6,
+  MCX: 7,
+  INDICES: 9,
+};
+
+/** Stable Kite-shaped token: (exchange token << 8) | segment code, as the ticker parser expects. */
+function tokenFor(key: string, segment: string, exchange: string): number {
+  const code = SEGMENT_CODE[segment === 'INDICES' ? 'INDICES' : exchange] ?? 1;
+  const exchangeToken = 1000 + (stringSeed(key) % 60_000);
+  return exchangeToken * 256 + code;
 }
 
 function parseDate(s: string): number {
@@ -123,7 +137,7 @@ export function mockInstruments(nowMs: number): MockInstrument[] {
   ) => {
     const key = instrumentKey(i.exchange, i.tradingsymbol);
     out.push({
-      instrument: { key, token: tokenFor(key), ...i },
+      instrument: { key, token: tokenFor(key, i.segment, i.exchange), ...i },
       spec: {
         seed: stringSeed(spec.seedKey ?? key),
         exchange: i.exchange,
