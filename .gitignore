@@ -1,0 +1,28 @@
+# Dependencies and builds
+node_modules/
+dist/
+*.tsbuildinfo
+coverage/
+
+# Secrets — never commit
+.env
+.env.*
+!.env.example
+
+# Local data: SQLite (session, instruments, candle cache), recorded ticks.
+# Zerodha's terms forbid redistributing market data, so none of it is committed.
+data/
+*.sqlite
+*.sqlite-*
+*.db
+*.db-*
+recordings/
+*.ticks.jsonl
+*.ticks.jsonl.gz
+
+# Editors / OS
+.DS_Store
+.idea/
+.vscode/*
+!.vscode/extensions.json
+*.log

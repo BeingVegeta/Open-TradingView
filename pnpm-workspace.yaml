@@ -1,0 +1,8 @@
+packages:
+  - apps/*
+  - packages/*
+
+# pnpm 10 blocks dependency install scripts unless listed here.
+onlyBuiltDependencies:
+  - better-sqlite3
+  - esbuild
