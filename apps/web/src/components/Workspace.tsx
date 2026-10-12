@@ -4,6 +4,7 @@ import { api, ApiError } from '../api';
 import { ChartView } from '../chart/ChartView';
 import { chartCount, DEFAULT_SYMBOL, useWorkspace } from '../workspace/workspaceStore';
 import { ChartToolbar } from './ChartToolbar';
+import { notify } from './Toasts';
 
 /** Resolves a chart's restored symbol once the instrument list is available. */
 function useRestoreInstrument(slot: number) {
@@ -27,7 +28,12 @@ function useRestoreInstrument(slot: number) {
           const i = await api.get<Instrument>(
             `/api/instruments/lookup?key=${encodeURIComponent(k)}`,
           );
-          if (!stop && useWorkspace.getState().charts[slot]!.key === key) setInstrument(i, slot);
+          if (stop || useWorkspace.getState().charts[slot]!.key !== key) return;
+          if (i.key !== key)
+            notify(
+              `${key} isn't in today's instrument list (expired or delisted?); showing ${i.key}.`,
+            );
+          setInstrument(i, slot);
           return;
         } catch (err) {
           if (!(err instanceof ApiError) || err.status !== 404) break;

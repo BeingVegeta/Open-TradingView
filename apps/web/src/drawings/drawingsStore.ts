@@ -2,6 +2,7 @@ import type { Drawing, DrawingType } from '@otv/shared';
 import { useEffect } from 'react';
 import { create } from 'zustand';
 import { api, qs } from '../api';
+import { failure, notify } from '../components/Toasts';
 
 export const DRAWING_COLORS = ['#f59e0b', '#60a5fa', '#22c55e', '#ef4444', '#e879f9', '#d6dbe4'];
 export const DEFAULT_COLOR: Record<DrawingType, string> = { hline: '#f59e0b', trend: '#60a5fa' };
@@ -35,7 +36,9 @@ export const useDrawings = create<DrawingsState>((set, get) => ({
       key,
       window.setTimeout(() => {
         timers.delete(key);
-        void api.put(`/api/drawings?${qs({ key })}`, list).catch(() => {});
+        void api
+          .put(`/api/drawings?${qs({ key })}`, list)
+          .catch((e: unknown) => notify(failure(`Couldn't save drawings on ${key}`, e)));
       }, 400),
     );
   },
@@ -54,7 +57,7 @@ export function useInstrumentDrawings(key: string): Drawing[] {
         if (!useDrawings.getState().byKey[key])
           useDrawings.setState((s) => ({ byKey: { ...s.byKey, [key]: d } }));
       })
-      .catch(() => {})
+      .catch((e: unknown) => notify(failure(`Couldn't load drawings for ${key}`, e)))
       .finally(() => inflight.delete(key));
   }, [key, list]);
   return list ?? EMPTY;

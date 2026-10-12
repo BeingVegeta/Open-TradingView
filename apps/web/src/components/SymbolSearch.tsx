@@ -7,6 +7,7 @@ import {
 import { useEffect, useRef, useState } from 'react';
 import { api, qs } from '../api';
 import { useWorkspace } from '../workspace/workspaceStore';
+import { failure } from './Toasts';
 
 const FILTERS = [
   { id: '', label: 'All' },
@@ -39,20 +40,36 @@ export function SymbolSearch() {
   const [query, setQuery] = useState('');
   const [filter, setFilter] = useState('');
   const [open, setOpen] = useState(false);
-  const [results, setResults] = useState<Instrument[]>([]);
+  /** Results and the query/filter they answer; older ones are never shown or chosen. */
+  const [answer, setAnswer] = useState<{ for: string; results: Instrument[] }>({
+    for: '',
+    results: [],
+  });
+  const asked = `${filter}|${query}`;
+  const results = answer.for === asked ? answer.results : [];
+  const searching = answer.for !== asked;
   const [sync, setSync] = useState<InstrumentSyncStatus | null>(null);
+  const [error, setError] = useState<string | null>(null);
   const [active, setActive] = useState(0);
   /** Bumped to re-run the search while the instrument list is still downloading. */
   const [retry, setRetry] = useState(0);
 
-  // "/" focuses search from anywhere (except while typing in a field).
+  // From anywhere (except while typing in a field): "/" focuses search, and
+  // typing a letter starts a search with it, for the active chart.
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       const t = e.target as HTMLElement;
-      if (e.key === '/' && !['INPUT', 'TEXTAREA'].includes(t.tagName) && !t.isContentEditable) {
+      if (['INPUT', 'TEXTAREA', 'SELECT'].includes(t.tagName) || t.isContentEditable) return;
+      if (e.ctrlKey || e.metaKey || e.altKey) return;
+      if (e.key === '/') {
         e.preventDefault();
         inputRef.current?.focus();
         inputRef.current?.select();
+      } else if (/^[a-zA-Z]$/.test(e.key)) {
+        e.preventDefault();
+        setQuery(e.key.toUpperCase());
+        setOpen(true);
+        inputRef.current?.focus();
       }
     };
     window.addEventListener('keydown', onKey);
@@ -70,13 +87,16 @@ export function SymbolSearch() {
           ac.signal,
         )
         .then((r) => {
-          setResults(r.results);
+          setError(null);
+          setAnswer({ for: `${filter}|${query}`, results: r.results });
           setSync(r.sync);
           setActive(0);
           if (r.sync.count === 0 && !r.sync.error)
             retryTimer = window.setTimeout(() => setRetry((n) => n + 1), 1000);
         })
-        .catch(() => {});
+        .catch((e: unknown) => {
+          if (!ac.signal.aborted) setError(failure('Search failed', e));
+        });
     }, 60);
     return () => {
       window.clearTimeout(t);
@@ -118,7 +138,7 @@ export function SymbolSearch() {
       <input
         ref={inputRef}
         className="search-input"
-        placeholder="Search symbol  ( / )"
+        placeholder="Search symbol (type or press /)"
         value={query}
         spellCheck={false}
         autoComplete="off"
@@ -144,6 +164,7 @@ export function SymbolSearch() {
               </button>
             ))}
           </div>
+          {error && <div className="search-msg notice-warn">{error}</div>}
           {sync?.error && <div className="search-msg notice-warn">{sync.error}</div>}
           {syncing && !sync.error && (
             <div className="search-msg muted">
@@ -152,7 +173,7 @@ export function SymbolSearch() {
                 : 'Instrument list not downloaded yet.'}
             </div>
           )}
-          {!syncing && query.trim() && results.length === 0 && (
+          {!error && !syncing && !searching && query.trim() && results.length === 0 && (
             <div className="search-msg muted">No matches</div>
           )}
           {!query.trim() && !syncing && (

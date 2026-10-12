@@ -1,6 +1,7 @@
 import { getTimeframe, type Instrument, type Prefs, type TimeframeId } from '@otv/shared';
 import { create } from 'zustand';
 import { api } from '../api';
+import { failure, notify } from '../components/Toasts';
 
 const STORAGE_KEY = 'otv.workspace.v3';
 const OLD_STORAGE_KEYS = ['otv.workspace.v2', 'otv.workspace.v1'];
@@ -223,7 +224,9 @@ export function syncPrefs(): () => void {
     window.clearTimeout(saveTimer);
     saveTimer = window.setTimeout(() => {
       lastSaved = json;
-      void api.put('/api/prefs', snap).catch(() => {});
+      void api
+        .put('/api/prefs', snap)
+        .catch((e: unknown) => notify(failure("Couldn't save the layout", e)));
     }, 500);
   });
   return () => {

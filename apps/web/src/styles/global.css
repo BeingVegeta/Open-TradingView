@@ -1162,3 +1162,30 @@ button {
   border-color: var(--warn);
   color: var(--warn);
 }
+
+/* Notifications */
+.toasts {
+  position: fixed;
+  left: 16px;
+  bottom: 16px;
+  z-index: 50;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  max-width: min(480px, calc(100vw - 32px));
+}
+.toast {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 8px 8px 12px;
+  background: var(--bg-elev-2);
+  border: 1px solid var(--border-strong);
+  border-left: 3px solid var(--warn);
+  border-radius: var(--radius);
+  font-size: 13px;
+  box-shadow: 0 6px 20px rgb(0 0 0 / 0.45);
+}
+.toast span {
+  flex: 1;
+}

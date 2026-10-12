@@ -6,6 +6,7 @@ import { LoginScreen } from './components/LoginScreen';
 import { TopBar } from './components/TopBar';
 import { Workspace } from './components/Workspace';
 import { Sidebar } from './sidebar/Sidebar';
+import { Toasts } from './components/Toasts';
 
 export function App() {
   const status = useAuth((s) => s.status);
@@ -45,6 +46,7 @@ export function App() {
         <Workspace />
         <Sidebar />
       </div>
+      <Toasts />
     </div>
   );
 }

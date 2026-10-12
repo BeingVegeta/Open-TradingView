@@ -8,16 +8,28 @@ import {
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { api, qs } from '../api';
 import { formatPrice } from '../format';
+import { failure, notify } from '../components/Toasts';
 import { useWorkspace } from '../workspace/workspaceStore';
 import { useQuotes } from './useQuotes';
 
 function useWatchlists() {
   const [lists, setLists] = useState<WatchlistT[] | null>(null);
-  const reload = useCallback(() => api.get<WatchlistT[]>('/api/watchlists').then(setLists), []);
+  const [error, setError] = useState<string | null>(null);
+  const reload = useCallback(
+    () =>
+      api
+        .get<WatchlistT[]>('/api/watchlists')
+        .then((l) => {
+          setLists(l);
+          setError(null);
+        })
+        .catch((e: unknown) => setError(failure("Couldn't load watchlists", e))),
+    [],
+  );
   useEffect(() => {
-    void reload().catch(() => setLists([]));
+    void reload();
   }, [reload]);
-  return { lists, setLists, reload };
+  return { lists, setLists, reload, error };
 }
 
 /** Price cell that flashes green/red when the price moves. */
@@ -43,7 +55,11 @@ function PriceCell({ q, decimals }: { q: Quote | undefined; decimals: number }) 
 
 function AddSymbol({ onAdd }: { onAdd: (i: Instrument) => void }) {
   const [q, setQ] = useState('');
-  const [results, setResults] = useState<Instrument[]>([]);
+  // Results with the query they answer, so Enter never adds a stale match.
+  const [answer, setAnswer] = useState<{ for: string; results: Instrument[] }>({
+    for: '',
+    results: [],
+  });
   const [active, setActive] = useState(0);
   useEffect(() => {
     if (!q.trim()) return;
@@ -52,22 +68,21 @@ function AddSymbol({ onAdd }: { onAdd: (i: Instrument) => void }) {
       api
         .get<InstrumentSearchResponse>(`/api/instruments/search?${qs({ q, limit: 8 })}`, ac.signal)
         .then((r) => {
-          setResults(r.results);
+          setAnswer({ for: q, results: r.results });
           setActive(0);
         })
-        .catch(() => {});
+        .catch(() => {}); // the search box simply shows no matches
     }, 60);
     return () => {
       window.clearTimeout(t);
       ac.abort();
     };
   }, [q]);
-  const shown = q.trim() ? results : [];
+  const shown = q.trim() && answer.for === q ? answer.results : [];
   const pick = (i: Instrument | undefined) => {
     if (!i) return;
     onAdd(i);
     setQ('');
-    setResults([]);
   };
   return (
     <div className="wl-add">
@@ -106,7 +121,7 @@ function AddSymbol({ onAdd }: { onAdd: (i: Instrument) => void }) {
 }
 
 export function Watchlist() {
-  const { lists, setLists } = useWatchlists();
+  const { lists, setLists, reload, error } = useWatchlists();
   const layout = useWorkspace((s) => s.layout);
   const setLayout = useWorkspace((s) => s.setLayout);
   const current = useWorkspace((s) => s.charts[s.active]!.key);
@@ -158,14 +173,21 @@ export function Watchlist() {
     setLists((ls) => ls?.map((l) => (l.id === list.id ? optimistic : l)) ?? null);
     const saved = await api
       .patch<WatchlistT>(`/api/watchlists/${list.id}`, patch)
-      .catch(() => null);
+      .catch((e: unknown) => {
+        notify(failure("Couldn't save the watchlist", e));
+        return null;
+      });
     if (saved) setLists((ls) => ls?.map((l) => (l.id === saved.id ? saved : l)) ?? null);
+    else void reload(); // put back what the server has
   };
 
   const addList = async () => {
     const w = await api
       .post<WatchlistT>('/api/watchlists', { name: `Watchlist ${(lists?.length ?? 0) + 1}` })
-      .catch(() => null);
+      .catch((e: unknown) => {
+        notify(failure("Couldn't create the watchlist", e));
+        return null;
+      });
     if (!w) return;
     setLists((ls) => [...(ls ?? []), w]);
     setLayout({ watchlistId: w.id });
@@ -174,7 +196,10 @@ export function Watchlist() {
 
   const removeList = async () => {
     if (!list || !window.confirm(`Delete watchlist "${list.name}"?`)) return;
-    const rest = await api.del<WatchlistT[]>(`/api/watchlists/${list.id}`).catch(() => null);
+    const rest = await api.del<WatchlistT[]>(`/api/watchlists/${list.id}`).catch((e: unknown) => {
+      notify(failure("Couldn't delete the watchlist", e));
+      return null;
+    });
     if (rest) {
       setLists(rest);
       setLayout({ watchlistId: rest[0]?.id ?? null });
@@ -188,6 +213,15 @@ export function Watchlist() {
     void save({ items: next });
   };
 
+  if (error)
+    return (
+      <div className="panel-empty">
+        <p className="muted">{error}</p>
+        <button className="btn btn-sm" onClick={() => void reload()}>
+          Retry
+        </button>
+      </div>
+    );
   if (!lists) return <div className="panel-empty muted">Loading…</div>;
 
   return (
