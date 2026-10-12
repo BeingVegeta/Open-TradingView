@@ -1,5 +1,6 @@
 import type { Candle } from './market';
 import { bucketStart, exchangeSession, regularSession, type ExchangeSession } from './sessions';
+import { isPeriodBar, type BarLength } from './timeframes';
 import { istStartOfDay, MINUTE_MS } from './time';
 import { tickTime, type Tick } from './ticks';
 
@@ -34,6 +35,8 @@ export interface BuilderResult {
  *   never a sum of ticks.
  * - A tick whose trade time is older than the forming bar (no new trade) is ignored.
  * - Day bars come straight from the exchange's day OHLC when the tick has it.
+ *   Week and month bars combine the period's earlier days (from history, see
+ *   `seedDays`) with today's day bar.
  * - Indices have no volume; their bars carry volume 0.
  *
  * Live bars are approximations (ticks are throttled snapshots); closed bars are
@@ -46,14 +49,17 @@ export class CandleBuilder {
   /** Cumulative day volume of the last accepted tick, and its IST day. */
   private lastCum: number | null = null;
   private lastCumDay: number | null = null;
+  /** Week/month bars: today's day bar, and the period's earlier days combined. */
+  private today: Candle | null = null;
+  private prior: Candle | null = null;
 
   /** Minutes after IST midnight during which ticks make candles. */
   readonly session: ExchangeSession;
 
   constructor(
     readonly exchange: string,
-    /** Bar length in minutes, or 'day'. */
-    readonly bar: number | 'day',
+    /** Bar length in minutes, or a calendar period. */
+    readonly bar: BarLength,
     /** Trading session for this instrument (default: `regularSession(exchange)`). */
     session?: ExchangeSession,
   ) {
@@ -69,9 +75,9 @@ export class CandleBuilder {
     return bucketStart(this.exchange, epochS * 1000, this.bar) / 1000;
   }
 
-  /** Whether a time falls inside the regular session (always true for day bars). */
+  /** Whether a time falls inside the regular session (always true for day and longer bars). */
   inSession(epochS: number): boolean {
-    if (this.bar === 'day') return true;
+    if (isPeriodBar(this.bar)) return true;
     const s = this.session;
     const minutes = (epochS * 1000 - istStartOfDay(epochS * 1000)) / MINUTE_MS;
     return minutes >= s.open && minutes < s.close;
@@ -82,10 +88,11 @@ export class CandleBuilder {
    * bar if ticks continue in it. Call before ticks, and again after a reconcile.
    */
   seed(last: Candle | undefined): void {
-    if (!last) return;
+    if (!last || this.bar === 'week' || this.bar === 'month') return; // see seedDays
     if (this.cur && this.cur.time > last.time) return; // already past it
     const sameBar = this.cur?.time === last.time;
     this.cur = { ...last };
+    if (this.bar === 'day') this.today = { ...last };
     // Volume continuity: keep the tick-derived base if we are mid-bar and it agrees.
     if (!sameBar) this.base = null;
     else if (this.lastCum !== null) this.base = this.lastCum - last.volume;
@@ -95,7 +102,7 @@ export class CandleBuilder {
     const t = tickTime(tick);
     const price = tick.lastPrice;
     if (!(price > 0)) return null;
-    if (this.bar === 'day') return this.applyDay(tick, t);
+    if (isPeriodBar(this.bar)) return this.applyPeriod(tick, t);
 
     const cum = tick.tradable === false ? undefined : tick.volume;
     if (!this.inSession(t)) {
@@ -153,12 +160,44 @@ export class CandleBuilder {
     this.lastCumDay = istStartOfDay(t * 1000);
   }
 
-  private applyDay(tick: BuilderTick, t: number): BuilderResult {
+  /**
+   * Week and month bars: seeds from the period's daily candles (ascending; the
+   * last is the newest day, possibly today's partial one).
+   */
+  seedDays(days: readonly Candle[]): void {
+    const last = days.at(-1);
+    if (!last || this.bar === 'day' || typeof this.bar === 'number') return;
+    const period = bucketStart(this.exchange, last.time * 1000, this.bar) / 1000;
+    if (this.cur && this.cur.time > period) return;
+    if (this.today && this.today.time > last.time) return; // ticks are already past it
+    let prior: Candle | null = null;
+    for (const d of days.slice(0, -1)) {
+      if (bucketStart(this.exchange, d.time * 1000, this.bar) / 1000 !== period) continue;
+      prior = prior ? combine(prior, d) : { ...d, time: period };
+    }
+    this.prior = prior;
+    this.today = { ...last };
+    this.cur = prior ? combine(prior, last) : { ...last, time: period };
+  }
+
+  private applyPeriod(tick: BuilderTick, t: number): BuilderResult {
     const day = istStartOfDay(t * 1000) / 1000;
+    const period = bucketStart(this.exchange, t * 1000, this.bar) / 1000;
+    if (this.cur && period < this.cur.time) return { current: { ...this.cur } };
+    if (this.today && day < this.today.time) return { current: { ...this.cur! } };
     let closed: Candle | undefined;
-    if (this.cur && day > this.cur.time) closed = { ...this.cur };
-    if (!this.cur || day > this.cur.time) {
-      this.cur = {
+    if (this.cur && period > this.cur.time) {
+      closed = { ...this.cur };
+      this.prior = null;
+      this.today = null;
+    }
+    if (this.today && day > this.today.time) {
+      // A new day within the same week or month.
+      this.prior = this.prior ? combine(this.prior, this.today) : { ...this.today, time: period };
+      this.today = null;
+    }
+    if (!this.today) {
+      this.today = {
         time: day,
         open: tick.lastPrice,
         high: tick.lastPrice,
@@ -167,8 +206,7 @@ export class CandleBuilder {
         volume: 0,
       };
     }
-    const c = this.cur;
-    if (day < c.time) return { current: { ...c } };
+    const c = this.today;
     if (tick.ohlc && tick.ohlc.open > 0) {
       // The exchange's own day OHLC is authoritative.
       c.open = tick.ohlc.open;
@@ -181,8 +219,24 @@ export class CandleBuilder {
     c.close = tick.lastPrice;
     if (tick.tradable !== false && tick.volume !== undefined) c.volume = tick.volume;
     if (tick.oi) c.oi = tick.oi;
-    return closed ? { closed, current: { ...c } } : { current: { ...c } };
+    this.cur = this.prior ? combine(this.prior, c) : { ...c, time: period };
+    return closed ? { closed, current: { ...this.cur } } : { current: { ...this.cur } };
   }
+}
+
+/** `a` followed by `b`, as one candle stamped with `a`'s time. */
+function combine(a: Candle, b: Candle): Candle {
+  const c: Candle = {
+    time: a.time,
+    open: a.open,
+    high: Math.max(a.high, b.high),
+    low: Math.min(a.low, b.low),
+    close: b.close,
+    volume: a.volume + b.volume,
+  };
+  const oi = b.oi ?? a.oi;
+  if (oi !== undefined) c.oi = oi;
+  return c;
 }
 
 /** Phase of an exchange's regular session at a moment (weekends closed; holidays unknown). */

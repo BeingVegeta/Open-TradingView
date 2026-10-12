@@ -2,6 +2,7 @@ import {
   getTimeframe,
   hasVolume,
   instrumentKind,
+  isPeriodBar,
   priceDecimals,
   type Candle,
   type Instrument,
@@ -222,7 +223,9 @@ export function ChartView({ instrument, tf }: { instrument: Instrument; tf: Time
     candlesRef.current?.applyOptions({
       priceFormat: { type: 'price', precision: priceDecimals(tick), minMove: tick },
     });
-    chartRef.current?.applyOptions({ timeScale: { timeVisible: tf !== '1D' } });
+    chartRef.current?.applyOptions({
+      timeScale: { timeVisible: !isPeriodBar(getTimeframe(tf)?.bar ?? 1) },
+    });
   }, [instrument, tf]);
 
   // Load the series whenever the symbol or timeframe changes.

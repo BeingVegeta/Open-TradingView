@@ -1,4 +1,4 @@
-import { istToEpoch, type ServerMessage } from '@otv/shared';
+import { getTimeframe, istToEpoch, type ServerMessage } from '@otv/shared';
 import { afterEach, describe, expect, it } from 'vitest';
 import WebSocket from 'ws';
 import { MarketClock } from '../src/kite/marketClock';
@@ -18,9 +18,9 @@ const until = async (cond: () => boolean | Promise<boolean>, ms = 8000) => {
   }
 };
 
-async function setup(speed = 30) {
+async function setup(speed = 30, start = istToEpoch(2026, 10, 12, 11, 0, 40)) {
   // Monday 11:00:40 IST; 30x so a 1-minute bar closes every 2 real seconds.
-  const clock = new MarketClock(istToEpoch(2026, 10, 12, 11, 0, 40), speed);
+  const clock = new MarketClock(start, speed);
   const gateway = new MockKiteGateway({ clock });
   await gateway.start();
   const m = await makeApp({
@@ -88,12 +88,7 @@ describe('live candles over /ws (mock market at 30x)', { timeout: 30_000 }, () =
       )
       .at(-1)!;
     const inst = m.instruments.get('NSE:RELIANCE')!;
-    const hist = await m.history.getBefore(
-      't',
-      inst,
-      { id: '1m', label: '1m', interval: 'minute', bar: 1 },
-      { limit: 20 },
-    );
+    const hist = await m.history.getBefore('t', inst, getTimeframe('1m')!, { limit: 20 });
     for (const b of replaced.bars) {
       const h = hist.candles.find((x) => x.time === b.time);
       if (h && b.time + 60 <= clock.now() / 1000) expect(b).toEqual(h);
@@ -116,13 +111,37 @@ describe('live candles over /ws (mock market at 30x)', { timeout: 30_000 }, () =
     for (const x of c.msgs)
       if (x.type === 'bars' && !x.replace) for (const b of x.bars) lastLive.set(b.time, b);
     const inst = m.instruments.get('NSE:INFY')!;
-    const hist = await m.history.getBefore(
-      't',
-      inst,
-      { id: '1m', label: '1m', interval: 'minute', bar: 1 },
-      { limit: 10 },
-    );
+    const hist = await m.history.getBefore('t', inst, getTimeframe('1m')!, { limit: 10 });
     expect(lastLive.get(startS)).toEqual(hist.candles.find((h) => h.time === startS));
+  });
+
+  it('streams aggregated timeframes: 2h anchored at 09:15, week combining earlier days', async () => {
+    // Wednesday 14 Oct, 12:00 IST.
+    const { wsUrl, m } = await setup(10, istToEpoch(2026, 10, 14, 12, 0, 5));
+    const c = connect(wsUrl);
+    await c.open;
+    c.ws.send(JSON.stringify({ type: 'subscribe', sub: 'h', key: 'NSE:INFY', tf: '2h' }));
+    c.ws.send(JSON.stringify({ type: 'subscribe', sub: 'w', key: 'NSE:INFY', tf: '1W' }));
+    const liveOf = (sub: string) =>
+      c.msgs.flatMap((x) => (x.type === 'bars' && x.sub === sub && !x.replace ? x.bars : []));
+    await until(() => liveOf('h').length >= 3 && liveOf('w').length >= 3);
+    const inst = m.instruments.get('NSE:INFY')!;
+
+    const twoH = liveOf('h').at(-1)!;
+    expect(twoH.time * 1000).toBe(istToEpoch(2026, 10, 14, 11, 15));
+    const hist2h = await m.history.getBefore('t', inst, getTimeframe('2h')!, { limit: 3 });
+    expect(twoH.open).toBe(hist2h.candles.find((h) => h.time === twoH.time)!.open);
+
+    const week = liveOf('w').at(-1)!;
+    expect(week.time * 1000).toBe(istToEpoch(2026, 10, 12));
+    const days = await m.history.getBefore('t', inst, getTimeframe('1D')!, { limit: 3 });
+    const [mon, tue, wed] = days.candles;
+    expect(week.open).toBe(mon!.open);
+    expect(week.high).toBeGreaterThanOrEqual(Math.max(mon!.high, tue!.high));
+    expect(week.low).toBeLessThanOrEqual(Math.min(mon!.low, tue!.low));
+    // Monday + Tuesday + today's cumulative volume so far.
+    expect(week.volume).toBeGreaterThan(mon!.volume + tue!.volume);
+    expect(week.volume).toBeLessThanOrEqual(mon!.volume + tue!.volume + wed!.volume);
   });
 
   it('recovers from an upstream drop and re-syncs bars from history', async () => {

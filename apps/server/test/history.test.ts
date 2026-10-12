@@ -1,4 +1,6 @@
 import {
+  aggregateCandles,
+  formatIstDateTime,
   getTimeframe,
   istToEpoch,
   sessionOpenOn,
@@ -268,5 +270,85 @@ describe('HistoryService request economy', () => {
       expect(res.candles).toHaveLength(1000);
       expect(s.gateway.calls.history - before).toBe(1);
     }
+  });
+});
+
+describe('aggregated timeframes (2h, 4h, week, month)', () => {
+  const hhmm = (s: number) => formatIstDateTime(s * 1000).slice(11, 16);
+  const date = (s: number) => formatIstDateTime(s * 1000).slice(0, 10);
+
+  it('builds 2h and 4h bars from hourly candles, anchored at 09:15', async () => {
+    const s = setup();
+    const inst = s.inst('NSE:RELIANCE');
+    const hourly = await s.svc.getBefore('t', inst, tf('1h'), { limit: 300 });
+    for (const [id, bar] of [
+      ['2h', 120],
+      ['4h', 240],
+    ] as const) {
+      const res = await s.svc.getBefore('t', inst, tf(id), { limit: 40 });
+      expect(res.tf).toBe(id);
+      expect(res.candles).toHaveLength(40);
+      const want = aggregateCandles(hourly.candles, 'NSE', bar).slice(-40);
+      expect(res.candles).toEqual(want);
+    }
+    const twoH = await s.svc.getBefore('t', inst, tf('2h'), { limit: 8 });
+    // A full day: 09:15, 11:15, 13:15 (the last one 13:15–15:15, stocks close at 15:15).
+    expect(new Set(twoH.candles.map((c) => hhmm(c.time)))).toEqual(
+      new Set(['09:15', '11:15', '13:15']),
+    );
+  });
+
+  it('builds week and month bars from daily candles', async () => {
+    const s = setup();
+    const inst = s.inst('NSE:INFY');
+    const daily = await s.svc.getBefore('t', inst, tf('1D'), { limit: 2000 });
+    const weeks = await s.svc.getBefore('t', inst, tf('1W'), { limit: 100 });
+    expect(weeks.candles).toEqual(aggregateCandles(daily.candles, 'NSE', 'week').slice(-100));
+    // The current week starts Monday 12 Oct 2026 (today).
+    expect(date(weeks.candles.at(-1)!.time)).toBe('2026-10-12');
+    expect(weeks.candles.every((c) => toIstParts(c.time * 1000).weekday === 1)).toBe(true);
+    const months = await s.svc.getBefore('t', inst, tf('1M'), { limit: 24 });
+    expect(months.candles.map((c) => date(c.time)).slice(-3)).toEqual([
+      '2026-08-01',
+      '2026-09-01',
+      '2026-10-01',
+    ]);
+    expect(months.candles).toEqual(aggregateCandles(daily.candles, 'NSE', 'month').slice(-24));
+  });
+
+  it('scrolls back without gaps, overlaps or partial bars', async () => {
+    const s = setup();
+    const inst = s.inst('NSE:TCS');
+    for (const [id, pageSize] of [
+      ['4h', 50],
+      ['1W', 30],
+    ] as const) {
+      let res = await s.svc.getBefore('t', inst, tf(id), { limit: pageSize });
+      let all = res.candles;
+      for (let i = 0; i < 5 && res.hasMore; i++) {
+        res = await s.svc.getBefore('t', inst, tf(id), { before: all[0]!.time, limit: pageSize });
+        all = [...res.candles, ...all];
+      }
+      assertAscendingUnique(all);
+      const src = id === '4h' ? '1h' : '1D';
+      const raw = await s.svc.getBefore('t', inst, tf(src), {
+        before: all.at(-1)!.time + 7 * DAY,
+        limit: 5000,
+      });
+      const want = aggregateCandles(raw.candles, 'NSE', tf(id).bar).filter(
+        (c) => c.time >= all[0]!.time,
+      );
+      expect(all).toEqual(want);
+    }
+  });
+
+  it('serves the live edge since a bar start', async () => {
+    const s = setup();
+    const inst = s.inst('NSE:SBIN');
+    const full = await s.svc.getBefore('t', inst, tf('4h'), { limit: 10 });
+    const last = full.candles.at(-1)!;
+    // A `since` in the middle of the bar still returns the whole bar.
+    const res = await s.svc.getSince('t', inst, tf('4h'), last.time + 3600);
+    expect(res.candles).toEqual([last]);
   });
 });

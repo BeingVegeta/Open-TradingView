@@ -1,5 +1,6 @@
 import type { Candle } from './market';
 import { bucketStart } from './sessions';
+import type { BarLength } from './timeframes';
 
 /**
  * Rolls finer candles (ascending by time) up into coarser session-anchored
@@ -9,7 +10,7 @@ import { bucketStart } from './sessions';
 export function aggregateCandles(
   candles: readonly Candle[],
   exchange: string,
-  bar: number | 'day',
+  bar: BarLength,
 ): Candle[] {
   const out: Candle[] = [];
   let cur: Candle | undefined;

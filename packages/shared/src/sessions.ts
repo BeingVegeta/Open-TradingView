@@ -1,4 +1,5 @@
-import { istStartOfDay, MINUTE_MS } from './time';
+import type { BarLength } from './timeframes';
+import { DAY_MS, istStartOfDay, istToEpoch, MINUTE_MS, toIstParts } from './time';
 
 /**
  * Regular trading session per exchange, in IST minutes after midnight.
@@ -76,13 +77,22 @@ export function sessionOpenOn(exchange: string, epochMs: number): number {
 
 /**
  * Start (epoch ms) of the candle that contains `epochMs`, for a bar length in
- * minutes, anchored to the exchange's session open on that IST day. A `day`
- * bar starts at 00:00 IST, which is how Kite stamps daily candles.
+ * minutes, anchored to the exchange's session open on that IST day. Calendar
+ * bars start at 00:00 IST (how Kite stamps daily candles): `day` on the day,
+ * `week` on its Monday, `month` on its 1st.
  */
-export function bucketStart(exchange: string, epochMs: number, barMinutes: number | 'day'): number {
-  if (barMinutes === 'day') return istStartOfDay(epochMs);
+export function bucketStart(exchange: string, epochMs: number, bar: BarLength): number {
+  if (bar === 'day') return istStartOfDay(epochMs);
+  if (bar === 'week') {
+    const day = istStartOfDay(epochMs);
+    return day - ((toIstParts(day).weekday + 6) % 7) * DAY_MS;
+  }
+  if (bar === 'month') {
+    const p = toIstParts(epochMs);
+    return istToEpoch(p.year, p.month, 1);
+  }
   const open = sessionOpenOn(exchange, epochMs);
-  const len = barMinutes * MINUTE_MS;
+  const len = bar * MINUTE_MS;
   return open + Math.floor((epochMs - open) / len) * len;
 }
 

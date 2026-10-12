@@ -1,10 +1,13 @@
 import {
+  aggregateCandles,
+  bucketStart,
   DAY_MS,
   INTERVAL_BAR,
   instrumentKind,
   istStartOfDay,
   istToEpoch,
   sessionMinutes,
+  sourceTimeframe,
   type Candle,
   type HistoryResponse,
   type Instrument,
@@ -106,6 +109,7 @@ export class HistoryService {
     tf: Timeframe,
     opts: GetBeforeOpts,
   ): Promise<HistoryResponse> {
+    if (tf.aggregated) return this.getBeforeAggregated(accessToken, inst, tf, opts);
     const interval = tf.interval;
     let reset = this.checkToken(inst, interval);
     const nowS = Math.floor(this.now() / 1000);
@@ -244,6 +248,12 @@ export class HistoryService {
     since: number,
     opts: RequestOpts & { fresh?: boolean } = {},
   ): Promise<HistoryResponse> {
+    if (tf.aggregated) {
+      // From the start of the bar containing `since`, so the first bar is whole.
+      const from = bucketStart(inst.exchange, since * 1000, tf.bar) / 1000;
+      const res = await this.getSince(accessToken, inst, sourceTimeframe(tf), from, opts);
+      return { ...res, tf: tf.id, candles: aggregateCandles(res.candles, inst.exchange, tf.bar) };
+    }
     const interval = tf.interval;
     let reset = this.checkToken(inst, interval);
     const settled = istStartOfDay(this.now()) / 1000;
@@ -261,6 +271,52 @@ export class HistoryService {
     const res: HistoryResponse = { key: inst.key, tf: tf.id, candles, hasMore: true };
     if (reset) res.reset = true;
     return res;
+  }
+
+  /**
+   * 2h, 4h, week and month: Kite has no such interval, so these are built from
+   * the source interval's candles (cached as usual). The oldest bar is dropped
+   * while there is more history, since its earlier candles may not be loaded.
+   */
+  private async getBeforeAggregated(
+    accessToken: string,
+    inst: Instrument,
+    tf: Timeframe,
+    opts: GetBeforeOpts,
+  ): Promise<HistoryResponse> {
+    const src = sourceTimeframe(tf);
+    const perBar = tf.bar === 'week' ? 5 : tf.bar === 'month' ? 23 : Number(tf.bar) / 60;
+    const limit = Math.max(1, Math.min(opts.limit, 5000));
+    let cursor =
+      opts.before !== undefined
+        ? bucketStart(inst.exchange, opts.before * 1000, tf.bar) / 1000
+        : undefined;
+    let source: Candle[] = [];
+    let bars: Candle[] = [];
+    let hasMore = true;
+    let reset = false;
+    for (let i = 0; i < 4 && hasMore && bars.length <= limit; i++) {
+      const res = await this.getBefore(accessToken, inst, src, {
+        ...opts,
+        ...(cursor !== undefined ? { before: cursor } : {}),
+        limit: Math.min(5000, (limit + 1 - bars.length) * perBar + perBar),
+      });
+      if (res.reset) reset = true;
+      hasMore = res.hasMore;
+      if (!res.candles.length) break;
+      source = [...res.candles, ...source];
+      cursor = res.candles[0]!.time;
+      bars = aggregateCandles(source, inst.exchange, tf.bar);
+    }
+    if (hasMore) bars = bars.slice(1);
+    const out: HistoryResponse = {
+      key: inst.key,
+      tf: tf.id,
+      candles: bars.slice(-limit),
+      hasMore: hasMore || bars.length > limit,
+    };
+    if (reset) out.reset = true;
+    return out;
   }
 
   /** Drops cached series fetched under a different token (Kite reuses tokens after expiry). */

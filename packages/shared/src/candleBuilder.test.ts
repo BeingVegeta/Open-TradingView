@@ -230,3 +230,70 @@ describe('marketPhase', () => {
     expect(marketPhase('NSE', istToEpoch(2026, 10, 11, 11, 0))).toBe('closed'); // Sunday
   });
 });
+
+describe('CandleBuilder: week and month bars', () => {
+  const dayCandle = (day: number, o: number, h: number, l: number, c: number, v: number) => ({
+    time: istToEpoch(2026, 10, day) / 1000,
+    open: o,
+    high: h,
+    low: l,
+    close: c,
+    volume: v,
+  });
+  const dayTick = (time: number, price: number, cum: number, ohlc: [number, number, number]) =>
+    tk(time, price, cum, { ohlc: { open: ohlc[0], high: ohlc[1], low: ohlc[2], close: 0 } });
+
+  it('combines the earlier days of the week with today', () => {
+    const b = new CandleBuilder('NSE', 'week');
+    // Mon 12 and Tue 13 from history; Wed 14 partial.
+    b.seedDays([
+      dayCandle(9, 90, 95, 85, 92, 500),
+      dayCandle(12, 100, 110, 95, 105, 1000),
+      dayCandle(13, 105, 120, 100, 115, 2000),
+      dayCandle(14, 115, 116, 114, 115, 50),
+    ]);
+    expect(b.current).toMatchObject({
+      time: istToEpoch(2026, 10, 12) / 1000,
+      open: 100,
+      high: 120,
+      low: 95,
+      close: 115,
+      volume: 3050,
+    });
+    const r = b.apply(dayTick(at(10, 0, 0, 14), 90, 4000, [115, 118, 90]));
+    expect(r!.current).toMatchObject({ open: 100, high: 120, low: 90, close: 90, volume: 7000 });
+    // Thursday: Wednesday folds into the earlier days.
+    b.apply(dayTick(at(9, 30, 0, 15), 125, 100, [121, 125, 121]));
+    expect(b.current).toMatchObject({ high: 125, low: 90, close: 125, volume: 7100 });
+  });
+
+  it('closes the week on Monday and starts a new one', () => {
+    const b = new CandleBuilder('NSE', 'week');
+    b.seedDays([dayCandle(16, 100, 101, 99, 100, 10)]);
+    const r = b.apply(dayTick(at(9, 15, 5, 19), 103, 5, [103, 103, 103]));
+    expect(r!.closed).toMatchObject({ time: istToEpoch(2026, 10, 12) / 1000, close: 100 });
+    expect(r!.current).toMatchObject({
+      time: istToEpoch(2026, 10, 19) / 1000,
+      open: 103,
+      volume: 5,
+    });
+  });
+
+  it('builds month bars the same way', () => {
+    const b = new CandleBuilder('NSE', 'month');
+    b.seedDays([dayCandle(1, 50, 60, 45, 55, 10), dayCandle(12, 55, 70, 52, 66, 20)]);
+    expect(b.current).toMatchObject({
+      time: istToEpoch(2026, 10, 1) / 1000,
+      open: 50,
+      high: 70,
+      volume: 30,
+    });
+  });
+
+  it('keeps the seeded day range when ticks carry no day OHLC (ltp mode)', () => {
+    const b = new CandleBuilder('NSE', 'day');
+    b.seed(dayCandle(12, 100, 110, 95, 105, 1000));
+    const r = b.apply({ lastPrice: 106, receivedAt: at(11, 0, 0) * 1000, tradable: true });
+    expect(r!.current).toMatchObject({ open: 100, high: 110, low: 95, close: 106 });
+  });
+});

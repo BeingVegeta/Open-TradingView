@@ -1,9 +1,12 @@
 import { EventEmitter } from 'node:events';
 import {
+  aggregateCandles,
+  bucketStart,
   CandleBuilder,
   dropUnconfirmed,
   extendSessionTo,
   getTimeframe,
+  isPeriodBar,
   istStartOfDay,
   regularSession,
   type BarRange,
@@ -11,6 +14,7 @@ import {
   type Candle,
   type Instrument,
   type Tick,
+  type BarLength,
   type Timeframe,
 } from '@otv/shared';
 import type { FastifyBaseLogger } from 'fastify';
@@ -26,6 +30,14 @@ import { LiveDiagnostics } from './diagnostics';
 export const RECONCILE_DELAY_MS = 10_000;
 /** Bars kept per series for new subscribers. */
 const RECENT_BARS = 5;
+
+/** Bar length in seconds (the longest a month can be, for calendar periods). */
+function barSeconds(bar: BarLength): number {
+  if (bar === 'day') return 86_400;
+  if (bar === 'week') return 7 * 86_400;
+  if (bar === 'month') return 31 * 86_400;
+  return bar * 60;
+}
 
 interface Series {
   id: string;
@@ -146,7 +158,7 @@ export class LiveCandles extends EventEmitter<{ bars: [BarsEvent] }> {
   }
 
   private async start(s: Series): Promise<void> {
-    if (s.tf.bar !== 'day') {
+    if (!isPeriodBar(s.tf.bar)) {
       const session = await this.sessionFor(s.inst);
       s.builder = new CandleBuilder(s.inst.exchange, s.tf.bar, session);
     }
@@ -226,17 +238,24 @@ export class LiveCandles extends EventEmitter<{ bars: [BarsEvent] }> {
     const session = this.deps.auth.session();
     if (!session) return;
     const cur = s.builder.current;
-    const barS = s.tf.bar === 'day' ? 86_400 : s.tf.bar * 60;
+    const barS = barSeconds(s.tf.bar);
     // From two bars before the oldest bar we may have gotten wrong.
     const from =
       (s.recent[0]?.time ?? cur?.time ?? Math.floor(this.deps.clock.now() / 1000)) - 2 * barS;
     let kite: Candle[];
+    /** Week and month: the daily candles the bars are built from (seeds the builder). */
+    let days: Candle[] | null = null;
     try {
-      const res = await this.deps.history.getSince(session.accessToken, s.inst, s.tf, from, {
-        fresh: true,
-        priority: 'low',
-      });
-      kite = res.candles;
+      if (s.tf.bar === 'week' || s.tf.bar === 'month') {
+        days = await this.recentDays(session.accessToken, s.inst, s.tf.bar, from);
+        kite = aggregateCandles(days, s.inst.exchange, s.tf.bar);
+      } else {
+        const res = await this.deps.history.getSince(session.accessToken, s.inst, s.tf, from, {
+          fresh: true,
+          priority: 'low',
+        });
+        kite = res.candles;
+      }
     } catch (err) {
       const e = toKiteError(err);
       if (!this.deps.auth.handleKiteError(e)) {
@@ -253,7 +272,8 @@ export class LiveCandles extends EventEmitter<{ bars: [BarsEvent] }> {
     const closedFromKite = kite.filter((c) => !forming || c.time < forming.time);
     const newest = kite.at(-1);
     if (reseed || !s.seeded) {
-      s.builder.seed(newest);
+      if (days) s.builder.seedDays(days);
+      else s.builder.seed(newest);
       s.seeded = true;
     }
     if (!reseed && s.firstFullBar !== null) {
@@ -282,8 +302,31 @@ export class LiveCandles extends EventEmitter<{ bars: [BarsEvent] }> {
     this.emit('bars', { series: s.id, bars: replace, replace: true, range });
   }
 
+  /** Daily candles from the start of the week or month containing `from`, up to today. */
+  private async recentDays(
+    accessToken: string,
+    inst: Instrument,
+    bar: 'week' | 'month',
+    from: number,
+  ): Promise<Candle[]> {
+    const day = getTimeframe('1D')!;
+    const since = bucketStart(inst.exchange, from * 1000, bar) / 1000;
+    const res = await this.deps.history.getSince(accessToken, inst, day, since, {
+      fresh: true,
+      priority: 'low',
+    });
+    if (!res.reset) return res.candles;
+    // Not cached that far back (getSince only serves cached ranges): load it.
+    const back = await this.deps.history.getBefore(accessToken, inst, day, {
+      limit: 100, // > three months of trading days
+      priority: 'low',
+    });
+    return back.candles.filter((c) => c.time >= since);
+  }
+
   private scheduleReconcile(s: Series): void {
-    if (s.tf.bar === 'day') return; // day bars come from the exchange's own day OHLC
+    // Day, week and month bars come from the exchange's own day OHLC.
+    if (isPeriodBar(s.tf.bar)) return;
     const now = this.deps.clock.now();
     const nextBoundary = (s.builder.bucket(Math.floor(now / 1000)) + s.tf.bar * 60) * 1000;
     const delay = nextBoundary - now + (this.deps.reconcileDelayMs ?? RECONCILE_DELAY_MS);

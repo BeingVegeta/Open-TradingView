@@ -111,3 +111,65 @@ describe('regularSession (closing auction session)', () => {
     expect(extendSessionTo(cash, undefined)).toEqual(cash);
   });
 });
+
+describe('custom timeframes: buckets and aggregation', () => {
+  const at = (d: number, h: number, m: number) => istToEpoch(2026, 10, d, h, m);
+  const hm = (ms: number) => formatIstDateTime(ms).slice(11, 16);
+
+  it('anchors 2h and 4h bars to the session open', () => {
+    expect([9, 10, 11, 13, 15].map((h) => hm(bucketStart('NSE', at(12, h, 20), 120)))).toEqual([
+      '09:15',
+      '09:15',
+      '11:15',
+      '13:15',
+      '15:15',
+    ]);
+    expect(hm(bucketStart('NSE', at(12, 13, 14), 240))).toBe('09:15');
+    expect(hm(bucketStart('NSE', at(12, 13, 15), 240))).toBe('13:15');
+    expect(hm(bucketStart('MCX', at(12, 22, 0), 240))).toBe('21:00');
+  });
+
+  it('starts weeks on Monday and months on the 1st, at 00:00 IST', () => {
+    // Sunday 18 Oct 2026 23:59 IST belongs to the week of Monday 12 Oct.
+    expect(bucketStart('NSE', at(18, 23, 59), 'week')).toBe(istToEpoch(2026, 10, 12));
+    expect(bucketStart('NSE', at(19, 0, 0), 'week')).toBe(istToEpoch(2026, 10, 19));
+    expect(bucketStart('NSE', at(12, 0, 0), 'week')).toBe(istToEpoch(2026, 10, 12));
+    expect(bucketStart('NSE', at(31, 23, 59), 'month')).toBe(istToEpoch(2026, 10, 1));
+    expect(bucketStart('NSE', istToEpoch(2026, 11, 1), 'month')).toBe(istToEpoch(2026, 11, 1));
+  });
+
+  it('builds 2h bars from hourly candles, the last one short (CAS close)', () => {
+    const hours = [9, 10, 11, 12, 13, 14].map((h, i) => ({
+      time: at(12, h, 15) / 1000,
+      open: 100 + i,
+      high: 110 + i,
+      low: 90 - i,
+      close: 101 + i,
+      volume: 10,
+    }));
+    const out = aggregateCandles(hours, 'NSE', 120);
+    expect(out.map((c) => hm(c.time * 1000))).toEqual(['09:15', '11:15', '13:15']);
+    expect(out[0]).toMatchObject({ open: 100, high: 111, low: 89, close: 102, volume: 20 });
+  });
+
+  it('builds week and month bars from daily candles', () => {
+    const days = [8, 9, 12, 13, 30].map((d, i) => ({
+      time: istToEpoch(2026, 10, d) / 1000,
+      open: 10 + i,
+      high: 20 + i,
+      low: 5 - i,
+      close: 11 + i,
+      volume: 100,
+    }));
+    const weeks = aggregateCandles(days, 'NSE', 'week');
+    expect(weeks.map((c) => formatIstDateTime(c.time * 1000).slice(0, 10))).toEqual([
+      '2026-10-05',
+      '2026-10-12',
+      '2026-10-26',
+    ]);
+    expect(weeks[1]).toMatchObject({ open: 12, high: 23, low: 2, close: 14, volume: 200 });
+    const months = aggregateCandles(days, 'NSE', 'month');
+    expect(months).toHaveLength(1);
+    expect(months[0]).toMatchObject({ open: 10, close: 15, volume: 500 });
+  });
+});
