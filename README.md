@@ -9,9 +9,10 @@ against your own [Zerodha Kite Connect](https://kite.trade/docs/connect/v3/) API
 - **Read-only.** The app never calls Kite's order endpoints (enforced by a lint rule).
 - **Secrets stay server-side.** The API secret and access token never reach the browser.
 
-> Status: milestone 4 of 5. Login, search, historical and live charts, watchlists, indicators,
-> market depth and saved layouts work. Polish (custom timeframes, multi-chart, drawing tools)
-> comes next. See [Roadmap](#roadmap).
+> Status: all five milestones of v1 are built: login, search, historical and live charts on 12
+> timeframes, up to four charts, watchlists, indicators, market depth, drawings and saved layouts.
+> The original brief is in [docs/BRIEF.md](docs/BRIEF.md) and every deviation from it in
+> [docs/DECISIONS.md](docs/DECISIONS.md).
 
 ## Requirements
 
@@ -52,11 +53,13 @@ pnpm start        # builds the web app and serves everything on http://127.0.0.1
 Open <http://127.0.0.1:8787> and click **Log in with Zerodha**. After logging in on Zerodha's
 page you land back in the app.
 
-- **Search** with the box in the top bar (or press <kbd>/</kbd>): symbol or name, optionally
+- **Search** by just typing a symbol (or with the box in the top bar, <kbd>/</kbd>): symbol or name, optionally
   `EXCHANGE:SYMBOL` (`NSE:INFY`) or extra words to narrow derivatives (`nifty fut`,
   `banknifty nov 56000 ce`). Filter chips restrict to stocks, indices, futures, options,
   commodities or currency.
-- **Timeframes**: 1m, 3m, 5m, 10m, 15m, 30m, 1h and D (Kite's native intervals). The axis and
+- **Timeframes**: 1m, 3m, 5m, 10m, 15m, 30m, 1h and D are Kite's own intervals; 2h, 4h, W and M
+  are built on the server from hourly and daily candles (2h and 4h bars start at the session
+  open, NSE 09:15, 11:15, 13:15, 15:15; weeks start on Monday, months on the 1st). The axis and
   crosshair always show IST, whatever your computer's timezone.
 - **Scroll back** by dragging the chart to the right; older candles load before you reach the
   edge, until the start of the instrument's history.
@@ -76,9 +79,19 @@ page you land back in the app.
   They update live. Click an indicator's name in the legend to change its settings or colour;
   hover it to remove it. VWAP resets each trading day.
 - **Legend** (top-left of the chart): open, high, low, close, change and volume of the candle
-  under the crosshair (or the newest), and each indicator's values there.
-- **Layout is restored** on reload: symbol, timeframe, indicators, panel width and which panels
-  are open, saved on the server.
+  under the crosshair (or the newest), and each indicator's values there. A tag shows when that
+  chart's market isn't open (pre-open, closing auction, closed): each segment keeps its own hours.
+- **Several charts**: the layout buttons at the right of the chart toolbar show 1, 2 (side by
+  side or stacked), 3 or 4 charts. Each has its own symbol, timeframe and indicators. Click a
+  chart to make it active: the toolbar, search, watchlist clicks and the depth panel act on it.
+- **Drawings**: horizontal line (<kbd>Alt</kbd>+<kbd>H</kbd>) and trend line
+  (<kbd>Alt</kbd>+<kbd>T</kbd>, click the start, then the end) from the chart toolbar. Click a
+  drawing to select it, drag it or its ends, change its colour, or press <kbd>Delete</kbd>.
+  <kbd>Esc</kbd> cancels. Drawings belong to the symbol, so they appear on every timeframe and
+  chart of it; each end sits on the bar that contains it on the current timeframe. They're saved
+  on the server.
+- **Layout is restored** on reload: the charts and their symbols, timeframes and indicators,
+  panel width and which panels are open, saved on the server.
 
 ### Live data
 
@@ -89,26 +102,28 @@ as each period starts, on every timeframe.
   tabs; your browser only talks to the local server. Chart updates are sent about 6–7 times a
   second.
 - Candles follow the hours Kite's own candles cover, which differ by segment since SEBI's
-  closing auction session (checked against live Kite data, Oct 2026):
+  closing auction session (seen in live Kite data, Oct 2026; auction times from exchange notices):
 
-  | Segment                     | Candles                                            |
-  | --------------------------- | -------------------------------------------------- |
-  | NSE/BSE stocks              | 09:15–15:15 (then the closing auction until 15:30) |
-  | Indices                     | 09:15–15:30                                        |
-  | NFO/BFO futures and options | 09:15–15:40                                        |
-  | MCX                         | 09:00–23:30 (23:55 in winter)                      |
-  | Currency                    | 09:00–17:00                                        |
+  | Segment                                  | Candles                                        |
+  | ---------------------------------------- | ---------------------------------------------- |
+  | NSE/BSE stocks with futures (F&O stocks) | 09:15–15:15, then the closing auction to 15:35 |
+  | Other NSE/BSE stocks                     | 09:15–15:30                                    |
+  | Indices                                  | 09:15–15:30                                    |
+  | NFO/BFO futures and options              | 09:15–15:40                                    |
+  | MCX                                      | 09:00–23:30 (23:55 in winter)                  |
+  | Currency                                 | 09:00–17:00                                    |
 
-  Pre-open and closing-auction trades never make candles, but their volume is in the day
-  candle (as in Kite's). If a stock's previous day ran later than this (for example, one that
-  isn't part of the closing auction), the app follows that stock's hours.
+  Whether a stock has futures comes from Kite's instrument list. Pre-open and closing-auction
+  trades never make candles, but their volume is in the day candle (as in Kite's). If an
+  instrument's previous day ran later than this, the app follows that instrument's hours.
 
 - A candle's volume is the change in Kite's cumulative day volume.
 - Live candles are approximations (Kite sends throttled snapshots, not every trade). About 10
   seconds after each candle closes, and after any reconnect, the app re-fetches the recent
   candles from Kite and replaces its own, so network drops leave no gaps or duplicates. A live
   candle Kite doesn't have (a minute later) is removed.
-- The status pill in the top bar shows **Live**, **Market closed**, **Pre-open**,
+- The status pill in the top bar follows the active chart's market and shows **Live**,
+  **Market closed**, **Pre-open**, **Closing auction**,
   **Reconnecting** (Kite connection dropped; retries with backoff), **Offline** (lost the local
   server; reconnects by itself) or **No ticks** (in session but nothing arriving, e.g. a
   holiday — holidays aren't known to the app).
@@ -243,7 +258,8 @@ stored unencrypted in `data/otv.sqlite`, which is created with owner-only permis
    candlestick chart with timeframes and scroll-back~~
 3. ~~Realtime: mock tick feed, ticker manager, candle builder, live chart updates~~
 4. ~~Terminal: watchlist, indicators, OHLC legend, market depth, restored layout~~
-5. Polish: custom timeframes, multi-chart layout, drawing tools, keyboard search
+5. ~~Polish: custom timeframes, multi-chart layout, drawing tools, keyboard search, empty and
+   error states~~
 
 ## Licence and attribution
 
