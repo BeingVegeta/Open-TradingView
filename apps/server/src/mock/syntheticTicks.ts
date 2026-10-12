@@ -2,7 +2,7 @@ import {
   DAY_MS,
   istStartOfDay,
   MINUTE_MS,
-  regularSession,
+  CLOSING_AUCTION,
   type Candle,
   type DepthLevel,
   type Tick,
@@ -16,6 +16,7 @@ import {
   isMockTradingDay,
   minuteCandles,
   preOpenVolume,
+  specSession,
 } from './synth';
 
 interface DayState {
@@ -27,7 +28,7 @@ interface DayState {
   highBefore: number[];
   lowBefore: number[];
   preOpen: number;
-  /** Closing auction volume (NSE/BSE cash), matched at 15:30. */
+  /** Closing auction volume (F&O stocks), matched at 15:35. */
   auction: number;
   prevClose: number;
   sessionOpen: number;
@@ -35,7 +36,8 @@ interface DayState {
 
 const PRE_OPEN_MIN = 9 * 60;
 const PRE_OPEN_MATCH_MIN = 9 * 60 + 8;
-const CLOSING_AUCTION_MATCH_MIN = 15 * 60 + 30;
+/** The closing auction (15:15–15:35) is matched, and its volume reported, at its end. */
+const CLOSING_AUCTION_MATCH_MIN = CLOSING_AUCTION.end;
 
 function roundTick(p: number, tick: number): number {
   return Math.round(Math.round(p / tick) * tick * 1e6) / 1e6;
@@ -46,8 +48,8 @@ function roundTick(p: number, tick: number): number {
  * walks from the candle's open through its high and low to its close, and the
  * cumulative day volume grows so that, sampled once a second, the ticks rebuild
  * the historical 1-minute candles precisely. Includes the pre-open auction
- * (NSE/BSE cash) and, since SEBI's closing auction session, the 15:15–15:30
- * closing auction for cash stocks; neither may end up in regular candles.
+ * (NSE/BSE cash) and, since SEBI's closing auction session, the 15:15–15:35
+ * closing auction for F&O stocks; neither may end up in regular candles.
  * Outside trading hours it emits frozen snapshots.
  */
 export class SyntheticTicks {
@@ -70,7 +72,7 @@ export class SyntheticTicks {
   tickAt(m: MockInstrument, mode: TickMode, nowMs: number): Tick | null {
     const { spec, instrument } = m;
     const tradable = instrument.segment !== 'INDICES';
-    const sess = regularSession(spec.exchange, spec.segment);
+    const sess = specSession(spec);
     let day = istStartOfDay(nowMs);
     let minuteOfDay = (nowMs - day) / MINUTE_MS;
     // Before today's activity, or on a holiday: show the last session's final state.
@@ -104,8 +106,8 @@ export class SyntheticTicks {
       ltt = Math.min(nowS, Math.floor((day + PRE_OPEN_MATCH_MIN * MINUTE_MS) / 1000));
       high = low = price;
     } else if (minuteOfDay >= sess.close) {
-      // After continuous trading. Cash stocks then go through the closing auction:
-      // its volume is matched at 15:30 and only ever shows in the day total.
+      // After continuous trading. F&O stocks then go through the closing auction:
+      // its volume is matched at 15:35 and only ever shows in the day total.
       const last = st.minutes[n - 1]!;
       price = last.close;
       const matched = st.auction > 0 && minuteOfDay >= CLOSING_AUCTION_MATCH_MIN;
@@ -204,7 +206,7 @@ export class SyntheticTicks {
       preOpen,
       auction: closingAuctionVolume(m.spec, day),
       prevClose: prev?.close ?? minutes[0]!.open,
-      sessionOpen: day + regularSession(m.spec.exchange, m.spec.segment).open * MINUTE_MS,
+      sessionOpen: day + specSession(m.spec).open * MINUTE_MS,
     };
     if (this.days.size > 500) this.days.clear();
     this.days.set(key, st);

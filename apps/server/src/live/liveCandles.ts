@@ -8,7 +8,7 @@ import {
   getTimeframe,
   isPeriodBar,
   istStartOfDay,
-  regularSession,
+  instrumentSession,
   type BarRange,
   type ExchangeSession,
   type Candle,
@@ -117,11 +117,7 @@ export class LiveCandles extends EventEmitter<{ bars: [BarsEvent] }> {
         id,
         inst,
         tf,
-        builder: new CandleBuilder(
-          inst.exchange,
-          tf.bar,
-          regularSession(inst.exchange, inst.segment),
-        ),
+        builder: new CandleBuilder(inst.exchange, tf.bar, instrumentSession(inst)),
         consumers: new Set(),
         recent: [],
         seeded: false,
@@ -173,12 +169,13 @@ export class LiveCandles extends EventEmitter<{ bars: [BarsEvent] }> {
   }
 
   /**
-   * The instrument's trading session: the segment default (see `regularSession`),
+   * The instrument's trading session: the default for its segment and, for stocks,
+   * whether it has futures (see `regularSession`),
    * extended when its last complete day of 1-minute candles ran later (up to 30
    * minutes), e.g. a stock that isn't part of the closing auction session.
    */
   private async sessionFor(inst: Instrument): Promise<ExchangeSession> {
-    const base = regularSession(inst.exchange, inst.segment);
+    const base = instrumentSession(inst);
     const today = istStartOfDay(this.deps.clock.now()) / 1000;
     const cacheKey = `${inst.key}@${today}`;
     const hit = this.sessions.get(cacheKey);

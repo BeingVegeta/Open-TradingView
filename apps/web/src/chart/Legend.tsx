@@ -1,12 +1,15 @@
 import {
   formatIstDateTime,
   hasVolume,
+  instrumentPhase,
   priceDecimals,
   type Candle,
   type Instrument,
 } from '@otv/shared';
 import { useState } from 'react';
+import { PHASE_LABEL } from '../components/LiveStatusPill';
 import { formatPrice, formatQty } from '../format';
+import { useMarketNow } from '../live/useMarketNow';
 import { useWorkspace, type IndicatorConfig } from '../workspace/workspaceStore';
 import { INDICATOR_DEFS, indicatorLabel } from './indicatorDefs';
 
@@ -97,6 +100,7 @@ export function Legend({
         <span className="legend-sym">
           {instrument.tradingsymbol} · {tfLabel} · {instrument.exchange}
         </span>
+        <MarketTag instrument={instrument} />
         {c && (
           <>
             <span>
@@ -180,5 +184,24 @@ export function Legend({
         );
       })}
     </div>
+  );
+}
+
+/** This chart's market phase, when it isn't open (each segment keeps its own hours). */
+function MarketTag({ instrument }: { instrument: Instrument }) {
+  const { marketNow } = useMarketNow();
+  const phase = instrumentPhase(instrument, marketNow);
+  if (phase === 'open') return null;
+  return (
+    <span
+      className={`legend-tag ${phase === 'closing-auction' ? 'legend-tag-auction' : ''}`}
+      title={
+        phase === 'closing-auction'
+          ? 'Closing auction (15:15–15:35): continuous trading has ended; no candles are made'
+          : undefined
+      }
+    >
+      {PHASE_LABEL[phase]}
+    </span>
   );
 }

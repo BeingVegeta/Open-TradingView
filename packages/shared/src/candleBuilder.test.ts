@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import { CandleBuilder, marketPhase, type BuilderTick } from './candleBuilder';
-import { regularSession } from './sessions';
+import { CandleBuilder, type BuilderTick } from './candleBuilder';
+import { instrumentPhase, regularSession } from './sessions';
 import { formatIstDateTime, istToEpoch } from './time';
 
 /** IST wall-clock → epoch seconds on Mon 12 Oct 2026. */
@@ -81,13 +81,19 @@ describe('CandleBuilder: intraday bars', () => {
     expect(current!.volume).toBe(320);
   });
 
-  it('ends cash stocks at 15:15 (closing auction) and ignores later ticks', () => {
-    const b = new CandleBuilder('NSE', 5);
+  it('ends F&O stocks at 15:15 (closing auction) and ignores later ticks', () => {
+    const b = new CandleBuilder('NSE', 5, regularSession('NSE', 'NSE', { closingAuction: true }));
     run(b, [tk(at(15, 14, 50), 200, 90_000)]);
     // Closing auction (SEBI CAS): its trades are not part of any candle.
     expect(b.apply(tk(at(15, 15, 0), 201, 95_000))).toBeNull();
     expect(b.apply(tk(at(15, 30, 0), 202, 97_000))).toBeNull();
     expect(b.current).toMatchObject({ close: 200, volume: 0 });
+  });
+
+  it('keeps other stocks (no closing auction) trading until 15:30', () => {
+    const b = new CandleBuilder('NSE', 5, regularSession('NSE', 'NSE'));
+    expect(b.apply(tk(at(15, 29, 0), 200, 10))!.current.time).toBe(at(15, 25, 0));
+    expect(b.apply(tk(at(15, 30, 0), 201, 20))).toBeNull();
   });
 
   it('keeps F&O trading until 15:40 and indices until 15:30', () => {
@@ -221,13 +227,28 @@ describe('CandleBuilder: day bars', () => {
   });
 });
 
-describe('marketPhase', () => {
-  it('knows regular sessions, pre-open and weekends (holidays are not known)', () => {
-    expect(marketPhase('NSE', at(9, 10) * 1000)).toBe('pre-open');
-    expect(marketPhase('NSE', at(9, 15) * 1000)).toBe('open');
-    expect(marketPhase('NSE', at(15, 30) * 1000)).toBe('closed');
-    expect(marketPhase('MCX', at(22, 0) * 1000)).toBe('open');
-    expect(marketPhase('NSE', istToEpoch(2026, 10, 11, 11, 0))).toBe('closed'); // Sunday
+describe('instrumentPhase', () => {
+  const stock = { exchange: 'NSE', segment: 'NSE', closingAuction: false };
+  const fnoStock = { ...stock, closingAuction: true };
+  const future = { exchange: 'NFO', segment: 'NFO-FUT' };
+  const index = { exchange: 'NSE', segment: 'INDICES' };
+  const crude = { exchange: 'MCX', segment: 'MCX-FUT' };
+  const ms = (h: number, m: number) => at(h, m) * 1000;
+  it('follows each segment', () => {
+    expect(instrumentPhase(stock, ms(9, 10))).toBe('pre-open');
+    expect(instrumentPhase(stock, ms(9, 15))).toBe('open');
+    expect(instrumentPhase(stock, ms(15, 20))).toBe('open');
+    expect(instrumentPhase(stock, ms(15, 30))).toBe('closed');
+    expect(instrumentPhase(fnoStock, ms(15, 14))).toBe('open');
+    expect(instrumentPhase(fnoStock, ms(15, 15))).toBe('closing-auction');
+    expect(instrumentPhase(fnoStock, ms(15, 34))).toBe('closing-auction');
+    expect(instrumentPhase(fnoStock, ms(15, 35))).toBe('closed');
+    expect(instrumentPhase(index, ms(15, 29))).toBe('open');
+    expect(instrumentPhase(index, ms(15, 30))).toBe('closed');
+    expect(instrumentPhase(future, ms(15, 39))).toBe('open');
+    expect(instrumentPhase(future, ms(15, 40))).toBe('closed');
+    expect(instrumentPhase(crude, ms(22, 0))).toBe('open');
+    expect(instrumentPhase(stock, istToEpoch(2026, 10, 11, 11, 0))).toBe('closed'); // Sunday
   });
 });
 

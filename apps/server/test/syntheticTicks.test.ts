@@ -2,7 +2,7 @@ import {
   CandleBuilder,
   formatIstDateTime,
   istToEpoch,
-  regularSession,
+  instrumentSession,
   type Candle,
 } from '@otv/shared';
 import { describe, expect, it } from 'vitest';
@@ -35,11 +35,7 @@ function build(
   stepS = 1,
 ): Candle[] {
   const m = byKey.get(key)!;
-  const b = new CandleBuilder(
-    m.instrument.exchange,
-    bar,
-    regularSession(m.instrument.exchange, m.instrument.segment),
-  );
+  const b = new CandleBuilder(m.instrument.exchange, bar, instrumentSession(m.instrument));
   const bars: Candle[] = [];
   const warmup = bar === 'day' ? 0 : 60 * 60_000;
   for (let t = fromMs - warmup; t < toMs; t += stepS * 1000) {
@@ -96,7 +92,7 @@ describe('synthetic ticks → candle builder reproduce the mock history', () => 
     );
   });
 
-  it('closes each segment at its own time (stocks 15:15, indices 15:30, F&O 15:40)', async () => {
+  it('closes each segment at its own time (F&O stocks 15:15, others and indices 15:30, F&O 15:40)', async () => {
     const from = istToEpoch(2026, 10, 12, 15, 0);
     const to = istToEpoch(2026, 10, 12, 16, 0);
     const fut = universe.find(
@@ -106,7 +102,8 @@ describe('synthetic ticks → candle builder reproduce the mock history', () => 
       const bars = build(key, 1, from, to);
       return formatIstDateTime(bars.at(-1)!.time * 1000).slice(11, 16);
     };
-    expect(lastBar('NSE:INFY')).toBe('15:14');
+    expect(lastBar('NSE:INFY')).toBe('15:14'); // has futures: closing auction
+    expect(lastBar('NSE:TCS')).toBe('15:29'); // no futures in the mock: trades to 15:30
     expect(lastBar('NSE:NIFTY 50')).toBe('15:29');
     expect(lastBar(fut)).toBe('15:39');
     expect(build(fut, 1, from, to)).toEqual(await history(fut, 'minute', from, to));
@@ -136,8 +133,8 @@ describe('synthetic ticks → candle builder reproduce the mock history', () => 
       'NSE:TCS',
       'day',
       istToEpoch(2026, 10, 12),
-      // Past 15:30, so the closing auction's volume is in the day total.
-      istToEpoch(2026, 10, 12, 15, 31),
+      // Past 15:35, so the closing auction's volume is in the day total.
+      istToEpoch(2026, 10, 12, 15, 36),
       1,
     );
     const [hist] = await history(
@@ -147,6 +144,18 @@ describe('synthetic ticks → candle builder reproduce the mock history', () => 
       istToEpoch(2026, 10, 13),
     );
     expect(live.at(-1)).toEqual(hist);
+  });
+
+  it('adds closing-auction volume at 15:35, for F&O stocks only', async () => {
+    const dayVolume = async (key: string) =>
+      (await history(key, 'day', istToEpoch(2026, 10, 12), istToEpoch(2026, 10, 13)))[0]!.volume;
+    const cum = (key: string, h: number, m: number) =>
+      ticks.tickAt(byKey.get(key)!, 'full', istToEpoch(2026, 10, 12, h, m))!.volume!;
+    // INFY has futures: the auction runs 15:15–15:35 and is matched at its end.
+    expect(cum('NSE:INFY', 15, 34)).toBeLessThan(await dayVolume('NSE:INFY'));
+    expect(cum('NSE:INFY', 15, 35)).toBe(await dayVolume('NSE:INFY'));
+    // TCS has none: its day volume is complete at the 15:30 close.
+    expect(cum('NSE:TCS', 15, 30)).toBe(await dayVolume('NSE:TCS'));
   });
 
   it('gives every mock instrument a unique, segment-encoded token', () => {

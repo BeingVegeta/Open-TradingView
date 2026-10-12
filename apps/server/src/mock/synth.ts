@@ -13,6 +13,8 @@ export interface SynthSpec {
   exchange: string;
   /** Kite segment; decides the session (INDICES run to 15:30, cash stocks to 15:15). */
   segment: string;
+  /** NSE/BSE stock with futures: continuous trading ends 15:15, then the closing auction. */
+  closingAuction?: boolean;
   basePrice: number;
   /** Typical daily move as a fraction (0.015 = 1.5%). */
   dailyVol: number;
@@ -68,7 +70,7 @@ const PATH_CACHE_MAX = 5000;
 
 /** The intraday price path for a trading day: a Brownian bridge from the open to the close. */
 function dayPath(spec: SynthSpec, dayStartMs: number): DayPath {
-  const sess = regularSession(spec.exchange, spec.segment);
+  const sess = specSession(spec);
   const n = sess.close - sess.open;
   const ck = `${spec.seed}:${dayStartMs}:${n}`;
   const hit = pathCache.get(ck);
@@ -141,16 +143,22 @@ export function preOpenVolume(spec: SynthSpec, dayIndexOrStart: number): number 
 }
 
 /**
- * Shares matched in the closing auction session (SEBI's CAS, NSE/BSE cash market):
- * continuous trading ends at 15:15 and the closing price is discovered by an auction
- * until about 15:30. Its volume shows up only in the cumulative day volume.
+ * Shares matched in the closing auction session (SEBI's CAS, F&O stocks on NSE
+ * and BSE): continuous trading ends at 15:15 and the closing price is discovered
+ * by an auction until 15:35. Its volume shows up only in the cumulative day volume.
  */
 export function closingAuctionVolume(spec: SynthSpec, dayIndexOrStart: number): number {
-  if (!hasCashAuctions(spec)) return 0;
+  if (!hasCashAuctions(spec) || !spec.closingAuction) return 0;
   const d = dayIndexOrStart > 1e9 ? dayIndex(dayIndexOrStart) : dayIndexOrStart;
   return Math.round(spec.volumePerMinute * 8 * (0.5 + rand01(spec.seed, d, 4343)));
 }
 
+/** The spec's continuous-trading session (see regularSession). */
+export function specSession(spec: SynthSpec) {
+  return regularSession(spec.exchange, spec.segment, { closingAuction: !!spec.closingAuction });
+}
+
+/** NSE/BSE stocks: they have a pre-open auction (and F&O stocks a closing one). */
 export function hasCashAuctions(spec: SynthSpec): boolean {
   return (
     spec.volumePerMinute > 0 &&
@@ -168,7 +176,7 @@ export function minuteCandles(
 ): Candle[] {
   const out: Candle[] = [];
   const end = Math.min(toMs, nowMs + 1, spec.delistedAfter);
-  const sess = regularSession(spec.exchange, spec.segment);
+  const sess = specSession(spec);
   for (let day = istStartOfDay(Math.max(fromMs, spec.listedOn)); day < end; day += DAY_MS) {
     if (!isMockTradingDay(day)) continue;
     const { px, minutes } = dayPath(spec, day);

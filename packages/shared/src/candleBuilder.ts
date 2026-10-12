@@ -1,5 +1,5 @@
 import type { Candle } from './market';
-import { bucketStart, exchangeSession, regularSession, type ExchangeSession } from './sessions';
+import { bucketStart, regularSession, type ExchangeSession } from './sessions';
 import { isPeriodBar, type BarLength } from './timeframes';
 import { istStartOfDay, MINUTE_MS } from './time';
 import { tickTime, type Tick } from './ticks';
@@ -237,16 +237,4 @@ function combine(a: Candle, b: Candle): Candle {
   const oi = b.oi ?? a.oi;
   if (oi !== undefined) c.oi = oi;
   return c;
-}
-
-/** Phase of an exchange's regular session at a moment (weekends closed; holidays unknown). */
-export function marketPhase(exchange: string, epochMs: number): 'open' | 'pre-open' | 'closed' {
-  const day = istStartOfDay(epochMs);
-  const weekday = new Date(day + 330 * 60_000).getUTCDay();
-  if (weekday === 0 || weekday === 6) return 'closed';
-  const s = exchangeSession(exchange);
-  const m = (epochMs - day) / MINUTE_MS;
-  if (m >= s.open && m < s.close) return 'open';
-  if (m >= s.open - 15 && m < s.open) return 'pre-open';
-  return 'closed';
 }

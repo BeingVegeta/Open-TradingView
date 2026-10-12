@@ -1,3 +1,4 @@
+import type { Instrument } from './market';
 import type { BarLength } from './timeframes';
 import { DAY_MS, istStartOfDay, istToEpoch, MINUTE_MS, toIstParts } from './time';
 
@@ -32,36 +33,76 @@ export function exchangeSession(exchange: string): ExchangeSession {
   }
 }
 
-const NSE_CASH_SESSION: ExchangeSession = { open: 9 * 60 + 15, close: 15 * 60 + 15 };
+/** NSE/BSE stocks in the F&O segment: continuous trading ends when the closing auction starts. */
+const AUCTION_STOCK_SESSION: ExchangeSession = { open: 9 * 60 + 15, close: 15 * 60 + 15 };
 const NSE_DERIVATIVES_SESSION: ExchangeSession = { open: 9 * 60 + 15, close: 15 * 60 + 40 };
+
+/** SEBI's closing auction session for F&O stocks, in IST minutes: 15:15–15:35. */
+export const CLOSING_AUCTION = { start: 15 * 60 + 15, end: 15 * 60 + 35 } as const;
 
 /**
  * When candles are made for an instrument: the continuous-trading session that
- * Kite's historical candles cover. Verified against Kite data (Oct 2026):
+ * Kite's historical candles cover.
  *
- * - NSE/BSE stocks: 09:15–15:15 (continuous trading ends at 15:15; the closing
- *   auction until 15:30 produces no candles, but its volume is in the day total)
+ * - NSE/BSE stocks with futures (F&O stocks): 09:15–15:15. The closing auction
+ *   session (15:15–15:35) makes no candles; its volume is in the day total.
+ *   Seen in Kite data (Oct 2026); the times are from exchange notices.
+ * - Other NSE/BSE stocks: 09:15–15:30 (the auction covers F&O stocks only)
  * - Indices: 09:15–15:30
  * - NFO/BFO futures and options: 09:15–15:40 (checked on futures)
  * - MCX: 09:00–23:30 (23:55 in winter; the later time is used as the bound)
  * - Currency: 09:00–17:00
  *
  * The open (candle anchor) is the same as `exchangeSession`. The live candle
- * service extends the close when an instrument's previous day ran later (see
- * `extendSessionTo`), e.g. a stock outside the closing auction session.
+ * service also extends the close when an instrument's previous day ran later
+ * (see `extendSessionTo`).
  */
-export function regularSession(exchange: string, segment?: string): ExchangeSession {
+export function regularSession(
+  exchange: string,
+  segment?: string,
+  opts: { closingAuction?: boolean } = {},
+): ExchangeSession {
   if (segment === 'INDICES') return NSE_SESSION;
   switch (exchange) {
     case 'NSE':
     case 'BSE':
-      return NSE_CASH_SESSION;
+      return opts.closingAuction ? AUCTION_STOCK_SESSION : NSE_SESSION;
     case 'NFO':
     case 'BFO':
       return NSE_DERIVATIVES_SESSION;
     default:
       return exchangeSession(exchange);
   }
+}
+
+/** An instrument's session (see `regularSession`). */
+export function instrumentSession(
+  inst: Pick<Instrument, 'exchange' | 'segment' | 'closingAuction'>,
+): ExchangeSession {
+  return regularSession(inst.exchange, inst.segment, { closingAuction: !!inst.closingAuction });
+}
+
+export type MarketPhase = 'pre-open' | 'open' | 'closing-auction' | 'closed';
+
+/**
+ * Phase of an instrument's market at a moment: its own session (F&O until
+ * 15:40, MCX into the evening), the closing auction for F&O stocks, and the 15
+ * minutes before the open. Weekends are closed; holidays aren't known.
+ */
+export function instrumentPhase(
+  inst: Pick<Instrument, 'exchange' | 'segment' | 'closingAuction'>,
+  epochMs: number,
+): MarketPhase {
+  const day = istStartOfDay(epochMs);
+  const weekday = toIstParts(day).weekday;
+  if (weekday === 0 || weekday === 6) return 'closed';
+  const s = instrumentSession(inst);
+  const m = (epochMs - day) / MINUTE_MS;
+  if (m >= s.open && m < s.close) return 'open';
+  if (m >= s.open - 15 && m < s.open) return 'pre-open';
+  if (inst.closingAuction && m >= CLOSING_AUCTION.start && m < CLOSING_AUCTION.end)
+    return 'closing-auction';
+  return 'closed';
 }
 
 /** Upper bound of regular-session minutes per trading day. */

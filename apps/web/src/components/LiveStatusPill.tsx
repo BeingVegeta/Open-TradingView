@@ -1,31 +1,28 @@
-import { formatIstDateTime, marketPhase } from '@otv/shared';
-import { useEffect, useState } from 'react';
+import { formatIstDateTime, instrumentPhase, type Instrument } from '@otv/shared';
 import { useLive } from '../live/liveClient';
+import { useMarketNow } from '../live/useMarketNow';
+import { useWorkspace } from '../workspace/workspaceStore';
 
 type Tone = 'ok' | 'idle' | 'warn' | 'bad';
 
-const readClocks = () => ({ wall: Date.now(), perf: performance.now() });
-
-/** Wall and monotonic time, refreshed every `ms`. */
-function useClocks(ms: number) {
-  const [t, set] = useState(readClocks);
-  useEffect(() => {
-    const id = window.setInterval(() => set(readClocks()), ms);
-    return () => window.clearInterval(id);
-  }, [ms]);
-  return t;
-}
+const NSE_INDEX: Pick<Instrument, 'exchange' | 'segment'> = { exchange: 'NSE', segment: 'INDICES' };
+export const PHASE_LABEL = {
+  open: 'Open',
+  'pre-open': 'Pre-open',
+  'closing-auction': 'Closing auction',
+  closed: 'Market closed',
+} as const;
 
 /**
  * Connection status: browser ↔ local server, and server ↔ Kite ticker.
- * In mock/replay mode also shows the simulated market clock.
+ * In mock/replay mode also shows the simulated market clock. The market
+ * phase follows the active chart's instrument.
  */
 export function LiveStatusPill({ mock }: { mock: boolean }) {
-  const { conn, live, liveAt } = useLive();
-  const clocks = useClocks((live?.speed ?? 1) > 1 ? 250 : 1000);
-  const now = clocks.wall;
-  const speed = live?.speed ?? 1;
-  const marketNow = live ? live.marketNow + Math.max(0, clocks.perf - liveAt) * speed : now;
+  const { conn, live } = useLive();
+  const { now, marketNow, speed } = useMarketNow();
+  // The active chart's market: F&O trades until 15:40, MCX into the evening.
+  const active = useWorkspace((s) => s.instruments[s.active] ?? null);
   const shifted = live ? Math.abs(marketNow - now) > 60_000 || speed !== 1 : false;
 
   let tone: Tone;
@@ -53,7 +50,7 @@ export function LiveStatusPill({ mock }: { mock: boolean }) {
     title = 'Live data stopped (session ended).';
   } else {
     const fresh = live.lastTickAt !== null && now - live.lastTickAt < 15_000;
-    const phase = marketPhase('NSE', marketNow);
+    const phase = instrumentPhase(active ?? NSE_INDEX, marketNow);
     if (fresh && phase === 'open') {
       tone = 'ok';
       label = 'Live';
@@ -62,7 +59,7 @@ export function LiveStatusPill({ mock }: { mock: boolean }) {
       label = 'No ticks';
     } else {
       tone = 'idle';
-      label = phase === 'pre-open' ? 'Pre-open' : 'Market closed';
+      label = PHASE_LABEL[phase];
     }
     title = live.lastTickAt
       ? `Connected to Kite. Last tick ${Math.round((now - live.lastTickAt) / 1000)}s ago.`

@@ -88,9 +88,12 @@ describe('priceDecimals', () => {
 
 describe('regularSession (closing auction session)', () => {
   const hhmm = (m: number) => `${Math.floor(m / 60)}:${String(m % 60).padStart(2, '0')}`;
-  it('ends cash stocks at 15:15, indices at 15:30 and F&O at 15:40', () => {
-    expect(hhmm(regularSession('NSE', 'NSE').close)).toBe('15:15');
-    expect(hhmm(regularSession('BSE', 'BSE').close)).toBe('15:15');
+  it('ends F&O stocks at 15:15, other stocks and indices at 15:30, F&O at 15:40', () => {
+    const auction = { closingAuction: true };
+    expect(hhmm(regularSession('NSE', 'NSE', auction).close)).toBe('15:15');
+    expect(hhmm(regularSession('BSE', 'BSE', auction).close)).toBe('15:15');
+    expect(hhmm(regularSession('NSE', 'NSE').close)).toBe('15:30');
+    expect(hhmm(regularSession('BSE', 'BSE').close)).toBe('15:30');
     expect(hhmm(regularSession('NSE', 'INDICES').close)).toBe('15:30');
     expect(hhmm(regularSession('BSE', 'INDICES').close)).toBe('15:30');
     expect(hhmm(regularSession('NFO', 'NFO-FUT').close)).toBe('15:40');
@@ -99,7 +102,7 @@ describe('regularSession (closing auction session)', () => {
   });
 
   it('extends (never shortens) the close to cover the last candle of a day', () => {
-    const cash = regularSession('NSE', 'NSE');
+    const cash = regularSession('NSE', 'NSE', { closingAuction: true });
     const last = (h: number, m: number) => istToEpoch(2026, 10, 9, h, m) / 1000;
     // A stock still trading continuously until 15:30.
     expect(hhmm(extendSessionTo(cash, last(15, 29)).close)).toBe('15:30');

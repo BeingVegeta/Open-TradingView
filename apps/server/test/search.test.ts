@@ -1,6 +1,6 @@
-import { istToEpoch } from '@otv/shared';
+import { istToEpoch, type Instrument } from '@otv/shared';
 import { describe, expect, it } from 'vitest';
-import { InstrumentIndex } from '../src/instruments/search';
+import { InstrumentIndex, markClosingAuction } from '../src/instruments/search';
 import { mockInstruments } from '../src/mock/instruments';
 
 const index = new InstrumentIndex(
@@ -66,5 +66,45 @@ describe('instrument search ranking', () => {
     const t0 = performance.now();
     for (const q of ['reliance', 'nifty', 'n', 'banknifty nov ce', 'NSE:INFY']) idx.search(q);
     expect((performance.now() - t0) / 5).toBeLessThan(60);
+  });
+});
+
+describe('closing auction flag', () => {
+  it('marks NSE/BSE stocks with futures on NFO or BFO, and nothing else', () => {
+    const inst = (exchange: string, sym: string, extra: Partial<Instrument> = {}): Instrument => ({
+      key: `${exchange}:${sym}`,
+      token: Math.floor(Math.random() * 1e9),
+      exchange,
+      tradingsymbol: sym,
+      name: sym,
+      segment: exchange,
+      instrumentType: 'EQ',
+      expiry: null,
+      strike: 0,
+      tickSize: 0.05,
+      lotSize: 1,
+      ...extra,
+    });
+    const list = [
+      inst('NSE', 'RELIANCE', { name: 'RELIANCE INDUSTRIES' }),
+      inst('BSE', 'RELIANCE', { name: 'RELIANCE INDUSTRIES' }),
+      inst('NSE', 'SMALLCO'),
+      inst('NSE', 'NIFTY 50', { segment: 'INDICES' }),
+      inst('NFO', 'RELIANCE26OCTFUT', {
+        name: 'RELIANCE',
+        segment: 'NFO-FUT',
+        instrumentType: 'FUT',
+      }),
+      inst('NFO', 'NIFTY26OCTFUT', { name: 'NIFTY', segment: 'NFO-FUT', instrumentType: 'FUT' }),
+      inst('BFO', 'BSEONLY26OCTFUT', {
+        name: 'BSEONLY',
+        segment: 'BFO-FUT',
+        instrumentType: 'FUT',
+      }),
+      inst('BSE', 'BSEONLY'),
+    ];
+    markClosingAuction(list);
+    const flagged = list.filter((i) => i.closingAuction).map((i) => i.key);
+    expect(flagged).toEqual(['NSE:RELIANCE', 'BSE:RELIANCE', 'BSE:BSEONLY']);
   });
 });

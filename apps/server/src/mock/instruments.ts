@@ -218,7 +218,22 @@ export function mockInstruments(nowMs: number): MockInstrument[] {
     { sym: 'NIFTY', seedKey: 'IDX:NIFTY 50', price: 25100, lot: 75, vol: 0.009 },
     { sym: 'BANKNIFTY', seedKey: 'IDX:NIFTY BANK', price: 56200, lot: 35, vol: 0.011 },
     { sym: 'RELIANCE', seedKey: 'EQ:RELIANCE', price: 1380, lot: 500, vol: 0.016 },
+    { sym: 'HDFCBANK', seedKey: 'EQ:HDFCBANK', price: 960, lot: 550, vol: 0.014 },
+    { sym: 'INFY', seedKey: 'EQ:INFY', price: 1480, lot: 400, vol: 0.016 },
   ];
+  // F&O stocks (those with futures) go through the closing auction; other stocks don't.
+  const fno = new Set(underlyings.map((u) => u.sym));
+  for (const m of out) {
+    const { exchange, instrumentType, tradingsymbol } = m.instrument;
+    if (
+      (exchange === 'NSE' || exchange === 'BSE') &&
+      instrumentType === 'EQ' &&
+      fno.has(tradingsymbol)
+    ) {
+      m.spec.closingAuction = true;
+      m.instrument.closingAuction = true;
+    }
+  }
   for (const exp of [e1!, e2!]) {
     const p = toIstParts(exp);
     const tag = `${String(p.year).slice(2)}${MONTHS[p.month - 1]}`;

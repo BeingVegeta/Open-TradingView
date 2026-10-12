@@ -125,6 +125,7 @@ export class InstrumentIndex {
   }
 
   load(instruments: Instrument[]): void {
+    markClosingAuction(instruments);
     this.byKey = new Map(instruments.map((i) => [i.key, i]));
     this.byToken = new Map(instruments.map((i) => [i.token, i]));
     this.entries = instruments.map((i) => {
@@ -196,5 +197,24 @@ export class InstrumentIndex {
       if (top.length > limit) top.pop();
     }
     return top.map((x) => x.e.i);
+  }
+}
+
+/**
+ * Flags NSE/BSE stocks that have futures (on NFO or BFO, by the futures'
+ * underlying `name`): SEBI's closing auction session covers F&O stocks only,
+ * so their continuous trading ends at 15:15 instead of 15:30.
+ */
+export function markClosingAuction(instruments: Instrument[]): void {
+  const underlyings = new Set<string>();
+  for (const i of instruments) {
+    if (i.instrumentType === 'FUT' && (i.exchange === 'NFO' || i.exchange === 'BFO'))
+      underlyings.add(i.name.toUpperCase());
+  }
+  for (const i of instruments) {
+    if ((i.exchange === 'NSE' || i.exchange === 'BSE') && i.segment !== 'INDICES') {
+      if (underlyings.has(i.tradingsymbol.toUpperCase())) i.closingAuction = true;
+      else delete i.closingAuction;
+    }
   }
 }

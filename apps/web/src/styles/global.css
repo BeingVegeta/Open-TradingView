@@ -1110,3 +1110,55 @@ button {
 .login-card {
   position: relative;
 }
+
+/* Drawings */
+.drawing-bar {
+  position: absolute;
+  top: 8px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 6;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 8px;
+  background: var(--bg-elev);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius);
+  font-size: 12px;
+  box-shadow: 0 4px 16px rgb(0 0 0 / 0.4);
+}
+.swatch {
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  border: 2px solid transparent;
+  padding: 0;
+  cursor: pointer;
+}
+.swatch-on {
+  border-color: var(--text);
+}
+.tf-btn:disabled {
+  opacity: 0.35;
+  cursor: default;
+  background: transparent;
+}
+.btn-sm {
+  padding: 2px 8px;
+  font-size: 12px;
+}
+
+.legend-tag {
+  font-size: 10px;
+  padding: 0 5px;
+  border-radius: 3px;
+  border: 1px solid var(--border-strong);
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+}
+.legend-tag-auction {
+  border-color: var(--warn);
+  color: var(--warn);
+}

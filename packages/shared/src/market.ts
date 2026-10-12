@@ -16,6 +16,11 @@ export interface Instrument {
   strike: number;
   tickSize: number;
   lotSize: number;
+  /**
+   * NSE/BSE stocks with futures (from the instrument list): their continuous
+   * trading ends at 15:15, followed by SEBI's closing auction session.
+   */
+  closingAuction?: boolean;
 }
 
 export type InstrumentKind = 'equity' | 'index' | 'future' | 'option' | 'other';
