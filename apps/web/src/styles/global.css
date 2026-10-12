@@ -1189,3 +1189,39 @@ button {
 .toast span {
   flex: 1;
 }
+
+/* Switch timings (?perf=1) */
+.perf-overlay {
+  position: fixed;
+  right: 12px;
+  bottom: 12px;
+  z-index: 60;
+  padding: 6px 8px;
+  background: rgb(17 22 31 / 0.94);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius);
+  font: 11px var(--font-mono);
+  color: var(--text);
+  max-width: calc(100vw - 24px);
+}
+.perf-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.perf-overlay table {
+  border-collapse: collapse;
+  margin-top: 4px;
+}
+.perf-overlay th,
+.perf-overlay td {
+  padding: 1px 6px;
+  text-align: right;
+}
+.perf-overlay th:first-child,
+.perf-overlay td:first-child {
+  text-align: left;
+}
+.perf-slow td {
+  color: var(--down);
+}

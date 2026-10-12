@@ -35,7 +35,7 @@ import {
   useDrawings,
   useInstrumentDrawings,
 } from '../drawings/drawingsStore';
-import { useWorkspace } from '../workspace/workspaceStore';
+import { chartCount, useWorkspace } from '../workspace/workspaceStore';
 import { fromChartTime, toChartCandle, toChartTime } from './chartTime';
 import { DrawingsPrimitive, type DrawingHit } from './drawingsPrimitive';
 import { IndicatorLayer } from './indicatorLayer';
@@ -230,9 +230,9 @@ export function ChartView({
 
   /** Pushes a series' candles into the chart. `resetView` scrolls to the newest bars. */
   const render = useCallback(
-    (s: SeriesState, resetView: boolean) => {
+    (s: SeriesState, resetView: boolean): { priceMs: number; indicatorsMs: number } | null => {
       const chart = chartRef.current;
-      if (!chart) return;
+      if (!chart) return null;
       const t0 = performance.now();
       candlesRef.current!.setData(s.candles.map(toChartCandle));
       const withVolume = hasVolume(instrument);
@@ -254,12 +254,8 @@ export function ChartView({
           session: instrumentSession(instrument),
         }),
       );
-      recordPerf({
-        type: 'render-cost',
-        bars: s.candles.length,
-        priceMs: t1 - t0,
-        indicatorsMs: performance.now() - t1,
-      });
+      const cost = { priceMs: t1 - t0, indicatorsMs: performance.now() - t1 };
+      recordPerf({ type: 'render-cost', bars: s.candles.length, ...cost });
       // At the start of the instrument's history, don't let the view drift into empty space.
       chart.timeScale().applyOptions({ fixLeftEdge: !s.hasMore });
       if (resetView) {
@@ -271,6 +267,7 @@ export function ChartView({
       const id = `${instrument.key}|${currentRef.current.tf}`;
       setStatus(s.candles.length ? { id, state: 'ready' } : { id, state: 'empty' });
       refreshLegend();
+      return cost;
     },
     [instrument, refreshLegend],
   );
@@ -296,7 +293,7 @@ export function ChartView({
     let cancelled = false;
 
     const done = async (s: SeriesState, wasCached: boolean) => {
-      render(s, true);
+      const cost = render(s, true);
       setLoadedId(`${key}|${tf}`);
       await nextFrame();
       recordPerf({
@@ -306,6 +303,10 @@ export function ChartView({
         cached: wasCached,
         ms: performance.now() - startedAt,
         bars: s.candles.length,
+        ...(cost ?? {}),
+        indicators: useWorkspace.getState().charts[chartIndex]?.indicators.length ?? 0,
+        charts: chartCount(useWorkspace.getState().grid),
+        at: performance.now(),
       });
     };
 
@@ -332,7 +333,7 @@ export function ChartView({
     return () => {
       cancelled = true;
     };
-  }, [instrument.key, tf, render, retry]);
+  }, [instrument.key, tf, render, retry, chartIndex]);
 
   // Updates to the series on screen, whichever chart or live push caused them.
   const live = loadedId === seriesId;
