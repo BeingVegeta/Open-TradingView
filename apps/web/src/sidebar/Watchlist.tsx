@@ -109,7 +109,7 @@ export function Watchlist() {
   const { lists, setLists } = useWatchlists();
   const layout = useWorkspace((s) => s.layout);
   const setLayout = useWorkspace((s) => s.setLayout);
-  const current = useWorkspace((s) => s.key);
+  const current = useWorkspace((s) => s.charts[s.active]!.key);
   const [renaming, setRenaming] = useState(false);
   const [dragKey, setDragKey] = useState<string | null>(null);
 

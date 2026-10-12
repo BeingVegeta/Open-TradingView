@@ -22,7 +22,6 @@ import {
 } from 'lightweight-charts';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { ApiError } from '../api';
-import { liveClient } from '../live/liveClient';
 import { historyStore, type SeriesState } from '../market/historyStore';
 import { recordPerf } from '../perf';
 import { useWorkspace } from '../workspace/workspaceStore';
@@ -52,7 +51,16 @@ function nextFrame(): Promise<void> {
   return new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(() => r())));
 }
 
-export function ChartView({ instrument, tf }: { instrument: Instrument; tf: TimeframeId }) {
+export function ChartView({
+  chart: chartIndex,
+  instrument,
+  tf,
+}: {
+  /** Index of this chart in the workspace grid. */
+  chart: number;
+  instrument: Instrument;
+  tf: TimeframeId;
+}) {
   const containerRef = useRef<HTMLDivElement>(null);
   const chartRef = useRef<IChartApi | null>(null);
   const candlesRef = useRef<ISeriesApi<'Candlestick'> | null>(null);
@@ -60,7 +68,7 @@ export function ChartView({ instrument, tf }: { instrument: Instrument; tf: Time
   const layerRef = useRef<IndicatorLayer | null>(null);
   /** Bar time under the crosshair (epoch s), or null for the newest bar. */
   const hoverRef = useRef<number | null>(null);
-  const indicators = useWorkspace((s) => s.indicators);
+  const indicators = useWorkspace((s) => s.charts[chartIndex]!.indicators);
   const [legend, setLegend] = useState<LegendData>({
     candle: null,
     prev: null,
@@ -254,14 +262,8 @@ export function ChartView({ instrument, tf }: { instrument: Instrument; tf: Time
     if (cached) {
       void done(cached, true);
       if (Date.now() - cached.refreshedAt > TAIL_REFRESH_MS) {
-        historyStore
-          .refreshTail(key, tf)
-          .then((s) => {
-            if (!isCurrent()) return;
-            if (s) render(s, false);
-            else setRetry((n) => n + 1); // server asked for a full reload
-          })
-          .catch(() => {});
+        // Changes arrive through historyStore.onChange (a reload included).
+        historyStore.refreshTail(key, tf).catch(() => {});
       }
     } else {
       candlesRef.current?.setData([]);
@@ -282,7 +284,7 @@ export function ChartView({ instrument, tf }: { instrument: Instrument; tf: Time
     };
   }, [instrument.key, tf, render, retry]);
 
-  // Live updates for the series on screen.
+  // Updates to the series on screen, whichever chart or live push caused them.
   const live = loadedId === seriesId;
   useEffect(() => {
     if (!live) return;
@@ -293,40 +295,28 @@ export function ChartView({ instrument, tf }: { instrument: Instrument; tf: Time
       value: c.volume,
       color: c.close >= c.open ? UP_VOL : DOWN_VOL,
     });
-    return liveClient.subscribe(
-      key,
-      tf,
-      (bars, _replace, range) => {
-        const lastBefore = historyStore.get(key, tf)?.candles.at(-1)?.time ?? -Infinity;
-        const change = historyStore.applyBars(key, tf, bars, range);
-        if (change === 'all') {
-          const s = historyStore.get(key, tf);
-          if (s) render(s, false);
-        } else if (change === 'tail') {
-          // Only the newest bar changed or new bars started: cheap incremental update.
-          // (Lightweight Charts can only update its newest bar or append.)
-          const s = historyStore.get(key, tf)!;
-          let from = s.candles.length;
-          while (from > 0 && s.candles[from - 1]!.time >= lastBefore) from--;
-          for (const c of s.candles.slice(from)) {
-            candlesRef.current?.update(toChartCandle(c));
-            if (withVolume) volumeRef.current?.update(volBar(c));
-          }
-          layerRef.current?.update(s.candles, from);
-          if (hoverRef.current === null) refreshLegend();
+    const off = historyStore.onChange(key, tf, (change) => {
+      const s = historyStore.get(key, tf);
+      if (change.kind === 'reload' || !s) {
+        setRetry((n) => n + 1); // the server asked for a full reload
+      } else if (change.kind === 'all') {
+        render(s, false);
+      } else {
+        // Only the newest bars changed or new bars started: cheap incremental update.
+        // (Lightweight Charts can only update its newest bar or append.)
+        for (const c of s.candles.slice(change.from)) {
+          candlesRef.current?.update(toChartCandle(c));
+          if (withVolume) volumeRef.current?.update(volBar(c));
         }
-      },
-      () => {
-        // Reconnected after a gap: fetch whatever we missed.
-        historyStore
-          .refreshTail(key, tf)
-          .then((s) => {
-            if (s) render(s, false);
-            else setRetry((n) => n + 1);
-          })
-          .catch(() => {});
-      },
-    );
+        layerRef.current?.update(s.candles, change.from);
+        if (hoverRef.current === null) refreshLegend();
+      }
+    });
+    const unfollow = historyStore.follow(key, tf);
+    return () => {
+      off();
+      unfollow();
+    };
   }, [live, instrument, tf, render, refreshLegend]);
 
   // Scroll-back: fetch older candles before the user reaches the left edge.
@@ -363,23 +353,25 @@ export function ChartView({ instrument, tf }: { instrument: Instrument; tf: Time
             ms: performance.now() - t0,
             added,
           });
-          edgeReported = false;
-          const cur = historyStore.get(key, tf);
-          if (cur && added > 0 && currentRef.current.key === key && currentRef.current.tf === tf)
-            render(cur, false);
+          edgeReported = false; // the chart re-renders through historyStore.onChange
         })
         .catch(() => {});
     };
     const ts = chart.timeScale();
     ts.subscribeVisibleLogicalRangeChange(onRange);
     return () => ts.unsubscribeVisibleLogicalRangeChange(onRange);
-  }, [instrument.key, tf, render]);
+  }, [instrument.key, tf]);
 
   return (
     <div className="chart-wrap">
       <div ref={containerRef} className="chart" />
       {status.state === 'ready' && (
-        <Legend instrument={instrument} tfLabel={getTimeframe(tf)?.label ?? tf} data={legend} />
+        <Legend
+          chart={chartIndex}
+          instrument={instrument}
+          tfLabel={getTimeframe(tf)?.label ?? tf}
+          data={legend}
+        />
       )}
       {status.state === 'loading' && (
         <div className="chart-overlay">

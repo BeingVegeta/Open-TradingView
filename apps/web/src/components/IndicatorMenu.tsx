@@ -5,7 +5,7 @@ import { useWorkspace } from '../workspace/workspaceStore';
 
 export function IndicatorMenu({ instrument }: { instrument: Instrument | null }) {
   const [open, setOpen] = useState(false);
-  const list = useWorkspace((s) => s.indicators);
+  const list = useWorkspace((s) => s.charts[s.active]!.indicators);
   const setIndicators = useWorkspace((s) => s.setIndicators);
   const ref = useRef<HTMLDivElement>(null);
   const kind = instrument ? instrumentKind(instrument) : 'other';

@@ -20,12 +20,23 @@ export interface LegendData {
   hovering: boolean;
 }
 
-function Settings({ cfg, onClose }: { cfg: IndicatorConfig; onClose: () => void }) {
-  const list = useWorkspace((s) => s.indicators);
+function Settings({
+  chart,
+  cfg,
+  onClose,
+}: {
+  chart: number;
+  cfg: IndicatorConfig;
+  onClose: () => void;
+}) {
+  const list = useWorkspace((s) => s.charts[chart]!.indicators);
   const setIndicators = useWorkspace((s) => s.setIndicators);
   const def = INDICATOR_DEFS[cfg.type];
   const patch = (p: Partial<IndicatorConfig>) =>
-    setIndicators(list.map((i) => (i.id === cfg.id ? { ...i, ...p } : i)));
+    setIndicators(
+      list.map((i) => (i.id === cfg.id ? { ...i, ...p } : i)),
+      chart,
+    );
   return (
     <div className="ind-settings" onMouseDown={(e) => e.stopPropagation()}>
       {def.params.map((p) => (
@@ -61,16 +72,18 @@ function Settings({ cfg, onClose }: { cfg: IndicatorConfig; onClose: () => void 
 
 /** Top-left chart legend: OHLC of the bar under the crosshair (or the newest), and indicator values. */
 export function Legend({
+  chart,
   instrument,
   tfLabel,
   data,
 }: {
+  chart: number;
   instrument: Instrument;
   tfLabel: string;
   data: LegendData;
 }) {
   const [editing, setEditing] = useState<string | null>(null);
-  const list = useWorkspace((s) => s.indicators);
+  const list = useWorkspace((s) => s.charts[chart]!.indicators);
   const setIndicators = useWorkspace((s) => s.setIndicators);
   const d = Math.max(2, priceDecimals(instrument.tickSize > 0 ? instrument.tickSize : 0.05));
   const c = data.candle;
@@ -150,12 +163,19 @@ export function Legend({
             <button
               className="legend-x"
               title="Remove"
-              onClick={() => setIndicators(list.filter((i) => i.id !== cfg.id))}
+              onClick={() =>
+                setIndicators(
+                  list.filter((i) => i.id !== cfg.id),
+                  chart,
+                )
+              }
               aria-label={`Remove ${indicatorLabel(cfg)}`}
             >
               ×
             </button>
-            {editing === cfg.id && <Settings cfg={cfg} onClose={() => setEditing(null)} />}
+            {editing === cfg.id && (
+              <Settings chart={chart} cfg={cfg} onClose={() => setEditing(null)} />
+            )}
           </div>
         );
       })}

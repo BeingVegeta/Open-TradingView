@@ -1,5 +1,6 @@
 import { dropUnconfirmed, type BarRange, type Candle, type HistoryResponse } from '@otv/shared';
 import { api, qs } from '../api';
+import { liveClient } from '../live/liveClient';
 
 export interface SeriesState {
   candles: Candle[];
@@ -8,7 +9,17 @@ export interface SeriesState {
   refreshedAt: number;
 }
 
+/**
+ * What changed in a series: `tail` (only bars from index `from` on changed or were
+ * appended), `all` (earlier bars changed too), or `reload` (the server says the
+ * series must be loaded again from scratch, e.g. after a split adjustment).
+ */
+export type SeriesChange = { kind: 'tail'; from: number } | { kind: 'all' } | { kind: 'reload' };
+type Listener = (change: SeriesChange) => void;
+
 const INITIAL_BARS = 1000;
+/** Fewer for long bars: 400 weeks is already eight years of daily candles to fetch. */
+const INITIAL_BARS_BY_TF: Record<string, number> = { '1W': 400, '1M': 240 };
 const MAX_SERIES = 24;
 
 /**
@@ -20,9 +31,59 @@ class HistoryStore {
   private readonly series = new Map<string, SeriesState>();
   private readonly inflight = new Map<string, Promise<SeriesState>>();
   private readonly olderInflight = new Map<string, Promise<number>>();
+  private readonly listeners = new Map<string, Set<Listener>>();
+  private readonly following = new Map<string, { charts: number; stop: () => void }>();
 
   static id(key: string, tf: string) {
     return `${key}|${tf}`;
+  }
+
+  /** Calls `listener` whenever the series changes (whoever changed it). */
+  onChange(key: string, tf: string, listener: Listener): () => void {
+    const id = HistoryStore.id(key, tf);
+    let set = this.listeners.get(id);
+    if (!set) this.listeners.set(id, (set = new Set()));
+    set.add(listener);
+    return () => {
+      set.delete(listener);
+      if (!set.size) this.listeners.delete(id);
+    };
+  }
+
+  private emit(id: string, change: SeriesChange): void {
+    for (const l of this.listeners.get(id) ?? []) l(change);
+  }
+
+  /**
+   * Keeps a loaded series up to date with the server's live bars, once however
+   * many charts show it. Returns a stop function.
+   */
+  follow(key: string, tf: string): () => void {
+    const id = HistoryStore.id(key, tf);
+    let f = this.following.get(id);
+    if (!f) {
+      const stop = liveClient.subscribe(
+        key,
+        tf,
+        (bars, _replace, range) => this.applyBars(key, tf, bars, range),
+        () => {
+          // Reconnected after a gap: fetch whatever we missed.
+          this.refreshTail(key, tf).catch(() => {});
+        },
+      );
+      f = { charts: 0, stop };
+      this.following.set(id, f);
+    }
+    f.charts++;
+    const entry = f;
+    let stopped = false;
+    return () => {
+      if (stopped) return;
+      stopped = true;
+      if (--entry.charts > 0) return;
+      entry.stop();
+      if (this.following.get(id) === entry) this.following.delete(id);
+    };
   }
 
   get(key: string, tf: string): SeriesState | undefined {
@@ -48,7 +109,9 @@ class HistoryStore {
     let p = this.inflight.get(id);
     if (!p) {
       p = api
-        .get<HistoryResponse>(`/api/history?${qs({ key, tf, limit: INITIAL_BARS })}`)
+        .get<HistoryResponse>(
+          `/api/history?${qs({ key, tf, limit: INITIAL_BARS_BY_TF[tf] ?? INITIAL_BARS })}`,
+        )
         .then((r) =>
           this.put(id, { candles: r.candles, hasMore: r.hasMore, refreshedAt: Date.now() }),
         )
@@ -71,12 +134,17 @@ class HistoryStore {
         .then((r) => {
           const cur = this.series.get(id);
           if (!cur || r.reset) {
-            if (r.reset) this.series.delete(id);
+            if (r.reset) {
+              this.series.delete(id);
+              this.emit(id, { kind: 'reload' });
+            }
             return 0;
           }
           const older = r.candles.filter((c) => c.time < cur.candles[0]!.time);
           cur.candles = [...older, ...cur.candles];
+          const hadMore = cur.hasMore;
           cur.hasMore = r.hasMore;
+          if (older.length || hadMore !== r.hasMore) this.emit(id, { kind: 'all' });
           return older.length;
         })
         .finally(() => this.olderInflight.delete(id));
@@ -103,11 +171,13 @@ class HistoryStore {
     if (!cur) return null;
     if (r.reset) {
       this.series.delete(id);
+      this.emit(id, { kind: 'reload' });
       return null;
     }
     const keep = cur.candles.filter((c) => c.time < since);
     cur.candles = [...keep, ...r.candles];
     cur.refreshedAt = Date.now();
+    this.emit(id, { kind: 'all' });
     return cur;
   }
 
@@ -118,8 +188,21 @@ class HistoryStore {
    * if earlier bars changed, or null if nothing changed.
    */
   applyBars(key: string, tf: string, bars: Candle[], range?: BarRange): 'tail' | 'all' | null {
-    const s = this.series.get(HistoryStore.id(key, tf));
+    const id = HistoryStore.id(key, tf);
+    const s = this.series.get(id);
     if (!s) return null;
+    const lastBefore = s.candles.at(-1)?.time ?? -Infinity;
+    const result = this.merge(s, bars, range);
+    if (result === 'all') this.emit(id, { kind: 'all' });
+    else if (result === 'tail') {
+      let from = s.candles.length;
+      while (from > 0 && s.candles[from - 1]!.time >= lastBefore) from--;
+      this.emit(id, { kind: 'tail', from });
+    }
+    return result;
+  }
+
+  private merge(s: SeriesState, bars: Candle[], range?: BarRange): 'tail' | 'all' | null {
     let result: 'tail' | 'all' | null = null;
     if (range) {
       // Authoritative range: drop bars Kite doesn't have (e.g. live bars outside the session).

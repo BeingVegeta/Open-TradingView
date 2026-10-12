@@ -295,7 +295,9 @@ export class HistoryService {
     let bars: Candle[] = [];
     let hasMore = true;
     let reset = false;
-    for (let i = 0; i < 4 && hasMore && bars.length <= limit; i++) {
+    // One page of source candles is usually enough; scrolling back loads more. Only
+    // fetch again if it didn't yield a complete bar (its oldest bar is dropped).
+    for (let i = 0; i < 4 && hasMore && bars.length < 2; i++) {
       const res = await this.getBefore(accessToken, inst, src, {
         ...opts,
         ...(cursor !== undefined ? { before: cursor } : {}),

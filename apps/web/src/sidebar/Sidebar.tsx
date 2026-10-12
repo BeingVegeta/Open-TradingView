@@ -7,7 +7,7 @@ import { Watchlist } from './Watchlist';
 export function Sidebar() {
   const layout = useWorkspace((s) => s.layout);
   const setLayout = useWorkspace((s) => s.setLayout);
-  const instrument = useWorkspace((s) => s.instrument);
+  const instrument = useWorkspace((s) => s.instruments[s.active] ?? null);
   const drag = useRef<{ x: number; w: number } | null>(null);
 
   if (!layout.sidebarOpen) return null;
