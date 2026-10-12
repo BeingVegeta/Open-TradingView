@@ -15,6 +15,7 @@ import { registerGuards } from './http/guards';
 import { registerDiagnosticRoutes } from './http/diagnosticRoutes';
 import { registerMarketRoutes } from './http/marketRoutes';
 import { registerUserRoutes } from './http/userRoutes';
+import { DrawingStore } from './user/drawingStore';
 import { PrefsStore } from './user/prefsStore';
 import { WatchlistStore } from './user/watchlistStore';
 import { InstrumentStore } from './instruments/instrumentStore';
@@ -145,7 +146,11 @@ export async function buildApp(deps: AppDeps): Promise<App> {
   registerAuthRoutes(server, { config, auth, gateway });
   registerMarketRoutes(server, { auth, instruments, sync, history });
   registerDiagnosticRoutes(server, { auth, instruments, history, ticker, live });
-  registerUserRoutes(server, { watchlists: new WatchlistStore(db), prefs: new PrefsStore(db) });
+  registerUserRoutes(server, {
+    watchlists: new WatchlistStore(db),
+    prefs: new PrefsStore(db),
+    drawings: new DrawingStore(db),
+  });
   await registerClientHub(server, {
     auth,
     ticker,

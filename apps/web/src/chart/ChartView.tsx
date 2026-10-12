@@ -2,9 +2,13 @@ import {
   getTimeframe,
   hasVolume,
   instrumentKind,
+  instrumentSession,
   isPeriodBar,
   priceDecimals,
+  TimeMapper,
   type Candle,
+  type ChartPoint,
+  type Drawing,
   type Instrument,
   type TimeframeId,
 } from '@otv/shared';
@@ -24,8 +28,16 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { ApiError } from '../api';
 import { historyStore, type SeriesState } from '../market/historyStore';
 import { recordPerf } from '../perf';
+import {
+  DEFAULT_COLOR,
+  DRAWING_COLORS,
+  newDrawingId,
+  useDrawings,
+  useInstrumentDrawings,
+} from '../drawings/drawingsStore';
 import { useWorkspace } from '../workspace/workspaceStore';
 import { fromChartTime, toChartCandle, toChartTime } from './chartTime';
+import { DrawingsPrimitive, type DrawingHit } from './drawingsPrimitive';
 import { IndicatorLayer } from './indicatorLayer';
 import { Legend, type LegendData } from './Legend';
 
@@ -47,6 +59,28 @@ type Status = { id: string } & (
   | { state: 'error'; code: string; message: string }
 );
 
+/** A drawing moved by dragging `part` from `from` to `to`. */
+function moveDrawing(
+  d: Drawing,
+  part: DrawingHit['part'],
+  from: ChartPoint,
+  to: ChartPoint,
+  mapper: TimeMapper,
+  roundPrice: (p: number) => number,
+): Drawing {
+  const dp = to.price - from.price;
+  if (d.type === 'hline') return { ...d, price: roundPrice(d.price + dp) };
+  if (part === 'a') return { ...d, a: to };
+  if (part === 'b') return { ...d, b: to };
+  // Shift in bars rather than seconds, so a line keeps its shape across overnight gaps.
+  const dl = (mapper.toLogical(to.time) ?? 0) - (mapper.toLogical(from.time) ?? 0);
+  const shift = (p: ChartPoint): ChartPoint => ({
+    time: mapper.toTime((mapper.toLogical(p.time) ?? 0) + dl) ?? p.time,
+    price: p.price + dp,
+  });
+  return { ...d, a: shift(d.a), b: shift(d.b) };
+}
+
 function nextFrame(): Promise<void> {
   return new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(() => r())));
 }
@@ -66,6 +100,7 @@ export function ChartView({
   const candlesRef = useRef<ISeriesApi<'Candlestick'> | null>(null);
   const volumeRef = useRef<ISeriesApi<'Histogram'> | null>(null);
   const layerRef = useRef<IndicatorLayer | null>(null);
+  const drawRef = useRef<DrawingsPrimitive | null>(null);
   /** Bar time under the crosshair (epoch s), or null for the newest bar. */
   const hoverRef = useRef<number | null>(null);
   const indicators = useWorkspace((s) => s.charts[chartIndex]!.indicators);
@@ -129,10 +164,19 @@ export function ChartView({
     chart.priceScale('vol').applyOptions({ scaleMargins: { top: 0.82, bottom: 0 } });
     chartRef.current = chart;
     layerRef.current = new IndicatorLayer(chart);
+    const drawings = new DrawingsPrimitive();
+    candlesRef.current.attachPrimitive(drawings);
+    drawRef.current = drawings;
+    if (import.meta.env.DEV) {
+      // Inspection hook for development and browser tests.
+      const w = window as unknown as { __otvDrawings?: DrawingsPrimitive[] };
+      (w.__otvDrawings ??= []).push(drawings);
+    }
     return () => {
       chart.remove();
       chartRef.current = null;
       layerRef.current = null;
+      drawRef.current = null;
     };
   }, []);
 
@@ -204,6 +248,12 @@ export function ChartView({
       );
       const t1 = performance.now();
       layerRef.current?.setData(s.candles);
+      drawRef.current?.setMapper(
+        new TimeMapper(s.candles, {
+          bar: getTimeframe(currentRef.current.tf)?.bar ?? 1,
+          session: instrumentSession(instrument),
+        }),
+      );
       recordPerf({
         type: 'render-cost',
         bars: s.candles.length,
@@ -362,6 +412,170 @@ export function ChartView({
     return () => ts.unsubscribeVisibleLogicalRangeChange(onRange);
   }, [instrument.key, tf]);
 
+  // Drawings: shown on every timeframe of the instrument.
+  const drawings = useInstrumentDrawings(instrument.key);
+  const selectedId = useDrawings((s) =>
+    s.selected?.key === instrument.key ? s.selected.id : null,
+  );
+  const isActive = useWorkspace((s) => s.active === chartIndex);
+  useEffect(() => drawRef.current?.setDrawings(drawings), [drawings]);
+  useEffect(() => drawRef.current?.setSelected(selectedId), [selectedId]);
+
+  // Placing, selecting and dragging drawings. Lightweight Charts listens for mouse
+  // events, so a mousedown that starts drawing work is caught first (capture phase).
+  useEffect(() => {
+    const el = containerRef.current!;
+    const chart = chartRef.current!;
+    const prim = drawRef.current!;
+    const key = instrument.key;
+    const tick = instrument.tickSize > 0 ? instrument.tickSize : 0.05;
+    const roundPrice = (p: number) => Math.round(Math.round(p / tick) * tick * 1e6) / 1e6;
+    const list = () => useDrawings.getState().byKey[key] ?? [];
+    let drag: {
+      id: string;
+      part: DrawingHit['part'];
+      start: ChartPoint;
+      orig: Drawing;
+      latest: Drawing | null;
+    } | null = null;
+    let pending: { a: ChartPoint; x: number; y: number } | null = null;
+
+    const local = (e: MouseEvent) => {
+      const r = el.getBoundingClientRect();
+      return { x: e.clientX - r.left, y: e.clientY - r.top };
+    };
+    const inPricePane = (p: { x: number; y: number }) =>
+      p.x >= 0 &&
+      p.y >= 0 &&
+      p.x < chart.timeScale().width() &&
+      p.y < (chart.panes()[0]?.getHeight() ?? 0);
+    const setScroll = (on: boolean) => chart.applyOptions({ handleScroll: on, handleScale: on });
+    const stop = (e: Event) => {
+      e.preventDefault();
+      e.stopPropagation();
+    };
+    const finishTrend = (b: ChartPoint) => {
+      if (!pending) return;
+      const st = useDrawings.getState();
+      const d: Drawing = {
+        id: newDrawingId(),
+        type: 'trend',
+        a: { ...pending.a, price: roundPrice(pending.a.price) },
+        b: { ...b, price: roundPrice(b.price) },
+        color: DEFAULT_COLOR.trend,
+      };
+      pending = null;
+      prim.setPreview(null);
+      setScroll(true);
+      st.save(key, [...list(), d]);
+      st.setTool(null);
+      st.select({ key, id: d.id });
+    };
+    const cancelPending = () => {
+      if (!pending) return;
+      pending = null;
+      prim.setPreview(null);
+      setScroll(true);
+    };
+
+    const onDown = (e: MouseEvent) => {
+      if (e.button !== 0) return;
+      const p = local(e);
+      if (!inPricePane(p)) return;
+      const st = useDrawings.getState();
+      const pt = prim.fromXY(p.x, p.y);
+      if (st.tool) {
+        stop(e);
+        if (!pt) return;
+        if (st.tool === 'hline') {
+          const d: Drawing = {
+            id: newDrawingId(),
+            type: 'hline',
+            price: roundPrice(pt.price),
+            color: DEFAULT_COLOR.hline,
+          };
+          st.save(key, [...list(), d]);
+          st.setTool(null);
+          st.select({ key, id: d.id });
+        } else if (!pending) {
+          pending = { a: pt, x: p.x, y: p.y };
+          prim.setPreview({ a: pt, b: pt });
+          setScroll(false);
+        } else {
+          finishTrend(pt);
+        }
+        return;
+      }
+      const h = prim.hit(p.x, p.y);
+      const d = h && list().find((x) => x.id === h.id);
+      if (h && d && pt) {
+        stop(e);
+        st.select({ key, id: h.id });
+        drag = { id: h.id, part: h.part, start: pt, orig: d, latest: null };
+        setScroll(false);
+      } else if (st.selected) {
+        st.select(null);
+      }
+    };
+    const onMove = (e: MouseEvent) => {
+      if (!drag && !pending) return;
+      const p = local(e);
+      const pt = prim.fromXY(p.x, p.y);
+      if (!pt) return;
+      if (pending) {
+        prim.setPreview({ a: pending.a, b: pt });
+      } else if (drag) {
+        const d = moveDrawing(drag.orig, drag.part, drag.start, pt, prim.timeMapper, roundPrice);
+        drag.latest = d;
+        prim.setDrawings(list().map((x) => (x.id === d.id ? d : x)));
+      }
+    };
+    const onUp = (e: MouseEvent) => {
+      if (drag) {
+        const d = drag.latest;
+        drag = null;
+        setScroll(true);
+        if (d)
+          useDrawings.getState().save(
+            key,
+            list().map((x) => (x.id === d.id ? d : x)),
+          );
+        return;
+      }
+      if (pending) {
+        // Press-drag-release draws a trend line too.
+        const p = local(e);
+        if (Math.hypot(p.x - pending.x, p.y - pending.y) > 8) {
+          const pt = prim.fromXY(p.x, p.y);
+          if (pt) finishTrend(pt);
+        }
+      }
+    };
+    // Escape (or another tool) abandons a half-drawn trend line.
+    const unsub = useDrawings.subscribe((s) => {
+      if (s.tool !== 'trend') cancelPending();
+    });
+    el.addEventListener('mousedown', onDown, true);
+    window.addEventListener('mousemove', onMove);
+    window.addEventListener('mouseup', onUp);
+    return () => {
+      unsub();
+      cancelPending();
+      if (drag) setScroll(true);
+      el.removeEventListener('mousedown', onDown, true);
+      window.removeEventListener('mousemove', onMove);
+      window.removeEventListener('mouseup', onUp);
+    };
+  }, [instrument.key, instrument.tickSize]);
+
+  const selectedDrawing = selectedId ? drawings.find((d) => d.id === selectedId) : undefined;
+  const recolor = (color: string) =>
+    selectedDrawing &&
+    useDrawings.getState().save(
+      instrument.key,
+      drawings.map((d) => (d.id === selectedDrawing.id ? { ...d, color } : d)),
+    );
+
   return (
     <div className="chart-wrap">
       <div ref={containerRef} className="chart" />
@@ -372,6 +586,35 @@ export function ChartView({
           tfLabel={getTimeframe(tf)?.label ?? tf}
           data={legend}
         />
+      )}
+      {isActive && selectedDrawing && (
+        <div className="drawing-bar" onMouseDown={(e) => e.stopPropagation()}>
+          <span className="muted">
+            {selectedDrawing.type === 'hline' ? 'Horizontal line' : 'Trend line'}
+          </span>
+          {DRAWING_COLORS.map((c) => (
+            <button
+              key={c}
+              className={`swatch ${c === selectedDrawing.color ? 'swatch-on' : ''}`}
+              style={{ background: c }}
+              onClick={() => recolor(c)}
+              aria-label={`Colour ${c}`}
+            />
+          ))}
+          <button
+            className="btn btn-ghost btn-sm"
+            onClick={() => {
+              useDrawings.getState().save(
+                instrument.key,
+                drawings.filter((d) => d.id !== selectedDrawing.id),
+              );
+              useDrawings.getState().select(null);
+            }}
+            title="Delete (Del)"
+          >
+            Delete
+          </button>
+        </div>
       )}
       {status.state === 'loading' && (
         <div className="chart-overlay">

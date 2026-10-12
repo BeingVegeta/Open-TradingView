@@ -75,6 +75,11 @@ const MIGRATIONS: string[] = [
      position     INTEGER NOT NULL,
      PRIMARY KEY (watchlist_id, ikey)
    ) WITHOUT ROWID;`,
+  // 4: chart drawings, per instrument.
+  `CREATE TABLE drawings (
+     ikey TEXT PRIMARY KEY,
+     json TEXT NOT NULL
+   ) WITHOUT ROWID;`,
 ];
 
 export function migrate(db: Db): void {

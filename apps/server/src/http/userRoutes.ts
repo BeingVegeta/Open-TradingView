@@ -1,4 +1,5 @@
 import type { FastifyInstance } from 'fastify';
+import type { DrawingStore } from '../user/drawingStore';
 import type { PrefsStore } from '../user/prefsStore';
 import type { WatchlistStore } from '../user/watchlistStore';
 
@@ -7,9 +8,23 @@ const isStringArray = (v: unknown): v is string[] =>
 
 export function registerUserRoutes(
   app: FastifyInstance,
-  deps: { watchlists: WatchlistStore; prefs: PrefsStore },
+  deps: { watchlists: WatchlistStore; prefs: PrefsStore; drawings: DrawingStore },
 ): void {
-  const { watchlists, prefs } = deps;
+  const { watchlists, prefs, drawings } = deps;
+
+  const validKey = (k: unknown): k is string =>
+    typeof k === 'string' && k.includes(':') && k.length <= 80;
+
+  app.get<{ Querystring: { key?: string } }>('/api/drawings', async (req, reply) => {
+    if (!validKey(req.query.key)) return reply.code(400).send({ error: 'bad_request' });
+    return drawings.get(req.query.key);
+  });
+
+  app.put<{ Querystring: { key?: string }; Body: unknown }>('/api/drawings', async (req, reply) => {
+    if (!validKey(req.query.key) || !Array.isArray(req.body))
+      return reply.code(400).send({ error: 'bad_request', message: 'expected ?key= and an array' });
+    return drawings.set(req.query.key, req.body);
+  });
 
   app.get('/api/watchlists', async () => watchlists.all());
 

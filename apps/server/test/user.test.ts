@@ -108,3 +108,51 @@ describe('watchlists and prefs', () => {
     expect((await made.server.inject({ url: '/api/prefs', headers: HOST })).json()).toEqual(prefs);
   });
 });
+
+describe('drawings', () => {
+  it('stores well-formed drawings per instrument and drops malformed ones', async () => {
+    made = await makeApp();
+    const s = made.server;
+    const url = `/api/drawings?key=${encodeURIComponent('NSE:INFY')}`;
+    expect((await s.inject({ url, headers: HOST })).json()).toEqual([]);
+    const good = [
+      { id: 'h1', type: 'hline', price: 1500.5, color: '#f59e0b' },
+      {
+        id: 't1',
+        type: 'trend',
+        a: { time: 1_790_000_000, price: 1400 },
+        b: { time: 1_790_500_000, price: 1450 },
+        color: '#60a5fa',
+      },
+    ];
+    const bad = [
+      { id: 'x', type: 'hline', price: 'high', color: '#fff000' },
+      { id: 'y', type: 'circle', color: '#ffffff' },
+      { id: 'z', type: 'hline', price: 1, color: 'red; background:url(x)' },
+    ];
+    const put = await s.inject({ method: 'PUT', url, headers: json, payload: [...good, ...bad] });
+    expect(put.json()).toEqual(good);
+    expect((await s.inject({ url, headers: HOST })).json()).toEqual(good);
+    // Other instruments are separate.
+    expect((await s.inject({ url: '/api/drawings?key=NSE:TCS', headers: HOST })).json()).toEqual(
+      [],
+    );
+    // Persisted across restarts; an empty list clears them.
+    const db = made.db;
+    await s.close();
+    made = await makeApp({ db });
+    expect((await made.server.inject({ url, headers: HOST })).json()).toEqual(good);
+    await made.server.inject({ method: 'PUT', url, headers: json, payload: [] });
+    expect(made.db.prepare('SELECT count(*) n FROM drawings').get()).toEqual({ n: 0 });
+    expect(
+      (
+        await made.server.inject({
+          method: 'PUT',
+          url: '/api/drawings',
+          headers: json,
+          payload: [],
+        })
+      ).statusCode,
+    ).toBe(400);
+  });
+});

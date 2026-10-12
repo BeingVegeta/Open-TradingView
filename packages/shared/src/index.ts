@@ -9,3 +9,5 @@ export * from './ticks';
 export * from './time';
 export * from './timeframes';
 export * from './watchlist';
+export * from './drawings';
+export * from './barGrid';

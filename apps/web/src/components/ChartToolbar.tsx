@@ -1,5 +1,6 @@
 import { instrumentKind, TIMEFRAMES } from '@otv/shared';
 import { GRIDS, useActiveChart, useWorkspace, type GridId } from '../workspace/workspaceStore';
+import { DrawingTools } from './DrawingTools';
 import { IndicatorMenu } from './IndicatorMenu';
 
 /** Small pictures of each chart grid, for the layout buttons. */
@@ -72,6 +73,8 @@ export function ChartToolbar() {
       </div>
       <div className="toolbar-sep" />
       <IndicatorMenu instrument={instrument} />
+      <div className="toolbar-sep" />
+      <DrawingTools />
       <div className="toolbar-spacer" />
       <div className="tf-group" role="group" aria-label="Chart layout">
         {GRIDS.map((g) => (
