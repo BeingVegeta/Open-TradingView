@@ -12,6 +12,7 @@ import { CandleCache } from './history/candleCache';
 import { HistoryService } from './history/historyService';
 import { registerAuthRoutes } from './http/authRoutes';
 import { registerGuards } from './http/guards';
+import { registerDiagnosticRoutes } from './http/diagnosticRoutes';
 import { registerMarketRoutes } from './http/marketRoutes';
 import { registerUserRoutes } from './http/userRoutes';
 import { PrefsStore } from './user/prefsStore';
@@ -102,6 +103,7 @@ export async function buildApp(deps: AppDeps): Promise<App> {
     auth,
     urlFor: (token) => gateway.tickerUrl(token),
     log: server.log,
+    marketNow: () => marketClock.now(),
     ...(deps.onTickerFrame ? { onFrame: deps.onTickerFrame } : {}),
     ...(deps.tickerBackoffMs ? { minBackoffMs: deps.tickerBackoffMs } : {}),
   });
@@ -142,6 +144,7 @@ export async function buildApp(deps: AppDeps): Promise<App> {
   });
   registerAuthRoutes(server, { config, auth, gateway });
   registerMarketRoutes(server, { auth, instruments, sync, history });
+  registerDiagnosticRoutes(server, { auth, instruments, history, ticker, live });
   registerUserRoutes(server, { watchlists: new WatchlistStore(db), prefs: new PrefsStore(db) });
   await registerClientHub(server, {
     auth,

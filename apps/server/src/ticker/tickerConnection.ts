@@ -28,6 +28,11 @@ export interface TickerConnectionOpts {
   onConnected?: (reconnect: boolean) => void;
   log: FastifyBaseLogger;
   clock?: Clock;
+  /**
+   * Time stamped on received ticks (the market clock, which differs from wall
+   * time in mock/replay mode). Timers always use `clock`.
+   */
+  marketNow?: () => number;
   /** Treat the socket as dead if nothing (not even a heartbeat) arrives for this long. */
   silenceTimeoutMs?: number;
   minBackoffMs?: number;
@@ -159,12 +164,13 @@ export class TickerConnection {
       if (this.ws !== ws) return;
       this.armSilence();
       const now = this.clock.now();
+      const marketNow = this.opts.marketNow?.() ?? now;
       this.opts.onFrame?.(data, isBinary, now);
       if (isBinary) {
         if (data.length <= 2) return; // heartbeat
         let ticks: Tick[];
         try {
-          ticks = parseTickFrame(toArrayBuffer(data), now);
+          ticks = parseTickFrame(toArrayBuffer(data), marketNow);
         } catch (err) {
           this.opts.log.warn({ err: (err as Error).message }, 'Unparseable ticker frame');
           return;

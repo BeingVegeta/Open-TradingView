@@ -10,9 +10,9 @@ afterEach(async () => {
   for (const c of cleanups.splice(0).reverse()) await c();
 });
 
-const until = async (cond: () => boolean, ms = 8000) => {
+const until = async (cond: () => boolean | Promise<boolean>, ms = 8000) => {
   const end = Date.now() + ms;
-  while (!cond()) {
+  while (!(await cond())) {
     if (Date.now() > end) throw new Error('timed out');
     await new Promise((r) => setTimeout(r, 20));
   }
@@ -194,6 +194,46 @@ describe('live candles over /ws (mock market at 30x)', { timeout: 30_000 }, () =
 
     c.ws.send(JSON.stringify({ type: 'unwatch', sub: 'wl' }));
     await until(() => !m.ticker.desired().has(m.instruments.get('NSE:INFY')!.token));
+  });
+
+  it('reports live-vs-Kite candle differences and per-exchange anchoring', async () => {
+    const { wsUrl, m } = await setup(10);
+    const c = connect(wsUrl);
+    await c.open;
+    c.ws.send(JSON.stringify({ type: 'subscribe', sub: 'a', key: 'NSE:INFY', tf: '1m' }));
+    const base = wsUrl.replace('ws://', 'http://').replace('/ws', '');
+    const diag = async () =>
+      (await (await fetch(`${base}/api/dev/diagnostics`)).json()) as {
+        series: Record<string, { barsCompared: number; barsWithIdenticalOHLC: number }>;
+      };
+    await until(
+      async () => ((await diag()).series['NSE:INFY|1m']?.barsCompared ?? 0) >= 1,
+      25_000,
+    ).catch(async () => {
+      throw new Error(JSON.stringify(await diag()));
+    });
+    const st = (await diag()).series['NSE:INFY|1m']!;
+    // Mock ticks follow the history path exactly at 10x, so live bars match Kite's.
+    expect(st.barsWithIdenticalOHLC).toBe(st.barsCompared);
+
+    const a = (await (await fetch(`${base}/api/dev/anchoring`)).json()) as {
+      anchoring: Record<string, Record<string, string[]>>;
+    };
+    // Minutes past the hour at which every hourly candle starts.
+    const minutes = (key: string) => [
+      ...new Set(
+        Object.values(a.anchoring[key] ?? {})
+          .flat()
+          .map((t) => t.slice(3)),
+      ),
+    ];
+    expect(minutes('NSE:NIFTY 50')).toEqual(['15']);
+    expect(minutes('BSE:SENSEX')).toEqual(['15']);
+    expect(minutes(Object.keys(a.anchoring).find((k) => k.startsWith('MCX:'))!)).toEqual(['00']);
+    expect(minutes(Object.keys(a.anchoring).find((k) => k.startsWith('CDS:'))!)).toEqual(['00']);
+    const fullDay = Object.values(a.anchoring['NSE:NIFTY 50']!).find((d) => d.length === 7)!;
+    expect(fullDay).toEqual(['09:15', '10:15', '11:15', '12:15', '13:15', '14:15', '15:15']);
+    expect(m.ticker).toBeDefined();
   });
 
   it('releases the upstream subscription when the last viewer leaves', async () => {

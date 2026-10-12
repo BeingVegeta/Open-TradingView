@@ -14,6 +14,7 @@ import type { InstrumentStore } from '../instruments/instrumentStore';
 import type { Clock } from '../kite/clock';
 import { toKiteError } from '../kite/errors';
 import type { TickerManager } from '../ticker/tickerManager';
+import { LiveDiagnostics } from './diagnostics';
 
 /** How long after a bar closes to ask Kite for its historical version. */
 export const RECONCILE_DELAY_MS = 10_000;
@@ -31,6 +32,10 @@ interface Series {
   seeded: boolean;
   timer: unknown;
   lastTickAt: number;
+  /** Final live-built state of recent bars (for diagnostics). */
+  liveBars: Map<number, Candle>;
+  /** First bar opened by a tick (earlier bars were only partly observed). */
+  firstFullBar: number | null;
 }
 
 export interface BarsEvent {
@@ -50,6 +55,8 @@ export interface BarsEvent {
  * Kite's version. No gaps, no duplicates.
  */
 export class LiveCandles extends EventEmitter<{ bars: [BarsEvent] }> {
+  /** Live-built vs Kite comparison (see /api/dev/diagnostics). */
+  readonly diagnostics = new LiveDiagnostics();
   private readonly series = new Map<string, Series>();
   private readonly byToken = new Map<number, Set<Series>>();
 
@@ -94,6 +101,8 @@ export class LiveCandles extends EventEmitter<{ bars: [BarsEvent] }> {
         seeded: false,
         timer: undefined,
         lastTickAt: 0,
+        liveBars: new Map(),
+        firstFullBar: null,
       };
       this.series.set(id, s);
       void this.start(s);
@@ -142,6 +151,9 @@ export class LiveCandles extends EventEmitter<{ bars: [BarsEvent] }> {
         if (!r) continue;
         s.lastTickAt = t.receivedAt;
         const bars = r.closed ? [r.closed, r.current] : [r.current];
+        if (r.closed && s.firstFullBar === null) s.firstFullBar = r.current.time;
+        for (const b of bars) s.liveBars.set(b.time, b);
+        if (s.liveBars.size > 30) s.liveBars.delete(s.liveBars.keys().next().value!);
         for (const b of bars) this.remember(s, b);
         this.emit('bars', { series: s.id, bars, replace: false });
       }
@@ -183,6 +195,16 @@ export class LiveCandles extends EventEmitter<{ bars: [BarsEvent] }> {
       s.builder.seed(newest);
       s.seeded = true;
     }
+    if (!reseed && s.firstFullBar !== null) {
+      // Diagnostics: how did our fully observed live bars compare with Kite's?
+      const tick = s.inst.tickSize > 0 ? s.inst.tickSize : 0.05;
+      for (const k of closedFromKite) {
+        const live = s.liveBars.get(k.time);
+        if (!live || k.time < s.firstFullBar) continue;
+        const open = s.builder.bucket(k.time) === k.time && isSessionOpen(s, k.time);
+        this.diagnostics.compare(s.id, live, k, tick, open);
+      }
+    }
     const replace =
       reseed || !forming ? kite.slice(-RECENT_BARS) : closedFromKite.slice(-RECENT_BARS);
     if (!replace.length) return;
@@ -213,4 +235,9 @@ export class LiveCandles extends EventEmitter<{ bars: [BarsEvent] }> {
     }
     if (s.recent.length > RECENT_BARS) s.recent.splice(0, s.recent.length - RECENT_BARS);
   }
+}
+
+/** Whether a bar starts exactly at the exchange's session open (the day's first bar). */
+function isSessionOpen(s: Series, time: number): boolean {
+  return s.builder.inSession(time) && !s.builder.inSession(time - 60);
 }

@@ -34,6 +34,8 @@ export class TickerManager extends EventEmitter<{
       onFrame?: (data: Buffer, isBinary: boolean, receivedAt: number) => void;
       silenceTimeoutMs?: number;
       minBackoffMs?: number;
+      /** Market clock for tick timestamps (mock/replay); defaults to wall time. */
+      marketNow?: () => number;
     },
   ) {
     super();
@@ -56,6 +58,7 @@ export class TickerManager extends EventEmitter<{
       ...(deps.clock ? { clock: deps.clock } : {}),
       ...(deps.onFrame ? { onFrame: deps.onFrame } : {}),
       ...(deps.silenceTimeoutMs ? { silenceTimeoutMs: deps.silenceTimeoutMs } : {}),
+      ...(deps.marketNow ? { marketNow: deps.marketNow } : {}),
       ...(deps.minBackoffMs
         ? { minBackoffMs: deps.minBackoffMs, maxBackoffMs: deps.minBackoffMs * 4 }
         : {}),
