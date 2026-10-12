@@ -220,6 +220,22 @@ on `:8787`, which then sends the browser back to `:5173`.
 Tests run with `TZ=America/New_York` on purpose: all market-time logic must use IST explicitly
 and never depend on the machine's timezone.
 
+### Checking against live data
+
+[docs/LIVE_CHECKS.md](docs/LIVE_CHECKS.md) is the checklist for a trading day. It uses these
+read-only pages (times, volumes and yes/no answers, no price series):
+
+- `/api/dev/diagnostics`: the app's live candles compared with Kite's once each closes.
+- `/api/dev/aggregation?keys=A,B`: which 1-minute candles make up Kite's 15m/30m/1h candles on
+  the last complete day, the day's last 1-minute candle, and the session the app assumes.
+- `/api/dev/anchoring`: start times of hourly candles per exchange, and pre-open volume.
+- `/api/dev/ticks?keys=A,B`: the latest tick's times and day volume, and what changed since the
+  previous request (for the closing auction).
+
+Open the app with `?perf=1` (e.g. `http://127.0.0.1:8787/?perf=1`) to see each timeframe or
+symbol switch's timing on screen and in the browser console, with a Copy button; `?perf=0` turns
+it off again.
+
 ### Layout
 
 ```
