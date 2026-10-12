@@ -1,6 +1,7 @@
-import { istToEpoch, type Instrument } from '@otv/shared';
+import { instrumentSession, istToEpoch, type Instrument } from '@otv/shared';
 import { describe, expect, it } from 'vitest';
 import { InstrumentIndex, markClosingAuction } from '../src/instruments/search';
+import { parseInstrumentsCsv } from '../src/kite/instrumentsCsv';
 import { mockInstruments } from '../src/mock/instruments';
 
 const index = new InstrumentIndex(
@@ -106,5 +107,46 @@ describe('closing auction flag', () => {
     markClosingAuction(list);
     const flagged = list.filter((i) => i.closingAuction).map((i) => i.key);
     expect(flagged).toEqual(['NSE:RELIANCE', 'BSE:RELIANCE', 'BSE:BSEONLY']);
+  });
+});
+
+describe('closing auction flag from the instrument dump', () => {
+  // Rows in Kite's CSV format. Futures carry the underlying in `name`; the
+  // tradingsymbol (M&M26OCTFUT) is never parsed.
+  const csv = [
+    'instrument_token,exchange_token,tradingsymbol,name,last_price,expiry,strike,tick_size,lot_size,instrument_type,segment,exchange',
+    '519937,2031,M&M,"MAHINDRA & MAHINDRA",0,,0,0.1,1,EQ,NSE,NSE',
+    '12345601,48225,M&M26OCTFUT,"M&M",0,2026-10-27,0,0.1,200,FUT,NFO-FUT,NFO',
+    '12345602,48226,M&M26OCT3500CE,"M&M",0,2026-10-27,3500,0.05,200,CE,NFO-OPT,NFO',
+    '4267265,16669,BAJAJ-AUTO,"BAJAJ AUTO",0,,0,0.5,1,EQ,NSE,NSE',
+    '12345603,48227,BAJAJ-AUTO26OCTFUT,"BAJAJ-AUTO",0,2026-10-27,0,0.5,75,FUT,NFO-FUT,NFO',
+    // IDEA has futures; IDEAFORGE (IDEA is a prefix of it) does not.
+    '3677697,14366,IDEA,"VODAFONE IDEA",0,,0,0.01,1,EQ,NSE,NSE',
+    '12345604,48228,IDEA26OCTFUT,"IDEA",0,2026-10-27,0,0.01,70000,FUT,NFO-FUT,NFO',
+    '7458561,29136,IDEAFORGE,"IDEAFORGE TECHNOLOGY",0,,0,0.05,1,EQ,NSE,NSE',
+    // TATA is a prefix of an F&O stock's name but has no futures of its own.
+    '9999901,99001,TATA,"TATA EXAMPLE",0,,0,0.05,1,EQ,NSE,NSE',
+    '12345605,48229,TATASTEEL26OCTFUT,"TATASTEEL",0,2026-10-27,0,0.01,5500,FUT,NFO-FUT,NFO',
+    '895745,3499,TATASTEEL,"TATA STEEL",0,,0,0.01,1,EQ,NSE,NSE',
+    // The same stock on BSE is an F&O stock too.
+    '128083204,500520,M&M,"MAHINDRA & MAHINDRA",0,,0,0.05,1,EQ,BSE,BSE',
+    // An index future doesn't flag an index.
+    '256265,1024,NIFTY 50,"NIFTY 50",0,,0,0,0,EQ,INDICES,NSE',
+    '12345606,48230,NIFTY26OCTFUT,"NIFTY",0,2026-10-27,0,0.1,75,FUT,NFO-FUT,NFO',
+  ].join('\n');
+
+  it('flags exactly the stocks whose symbol is a futures underlying', () => {
+    const list = parseInstrumentsCsv(csv);
+    markClosingAuction(list);
+    expect(
+      list
+        .filter((i) => i.closingAuction)
+        .map((i) => i.key)
+        .sort(),
+    ).toEqual(['BSE:M&M', 'NSE:BAJAJ-AUTO', 'NSE:IDEA', 'NSE:M&M', 'NSE:TATASTEEL']);
+    const session = (key: string) => instrumentSession(list.find((i) => i.key === key)!).close;
+    expect(session('NSE:M&M')).toBe(15 * 60 + 15);
+    expect(session('NSE:IDEAFORGE')).toBe(15 * 60 + 30);
+    expect(session('NSE:TATA')).toBe(15 * 60 + 30);
   });
 });
