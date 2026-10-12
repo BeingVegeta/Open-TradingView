@@ -148,10 +148,18 @@ export async function registerClientHub(
     }
   }, QUOTE_FLUSH_MS);
   // Also lets the client see that ticks are flowing (lastTickAt) without a message per tick.
-  const statusTick = setInterval(() => {
+  let sentTickAt: number | null = null;
+  const broadcastStatus = () => {
     const st = liveStatus(ticker, clock);
+    sentTickAt = st.lastTickAt;
     for (const c of clients) send(c, { type: 'live', live: st });
-  }, 5000);
+  };
+  const statusTick = setInterval(broadcastStatus, 5000);
+  // When ticks resume after a quiet spell, say so now rather than at the next status.
+  ticker.on('ticks', () => {
+    const last = ticker.status.lastTickAt;
+    if (last !== null && (sentTickAt === null || last - sentTickAt > 10_000)) broadcastStatus();
+  });
   const pinger = setInterval(() => {
     for (const c of clients) {
       if (!c.alive) {
