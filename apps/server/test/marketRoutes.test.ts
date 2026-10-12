@@ -103,4 +103,27 @@ describe('aggregation diagnostic', () => {
     expect(rel['15m']!.allMatchOwnPeriod).toBe(true);
     expect(rel.dayCandleVolume).toBeGreaterThan(rel.sumOf1mVolumes);
   });
+
+  it('reports chosen instruments with the session the app assumes', async () => {
+    const { m } = await loggedIn();
+    const fut = [...m.instruments.index.search('nifty fut', { limit: 1 })][0]!.key;
+    const keys = ['NSE:INFY', 'NSE:TCS', fut, 'NSE:NOPE'].join(',');
+    const r = await m.server.inject({
+      url: `/api/dev/aggregation?keys=${encodeURIComponent(keys)}`,
+      headers: HOST,
+    });
+    const body = r.json() as Record<string, Record<string, unknown>>;
+    expect(body['NSE:INFY']).toMatchObject({
+      appClosingAuction: true,
+      appSessionEnd: '15:15',
+      last1m: '15:14',
+    });
+    expect(body['NSE:TCS']).toMatchObject({
+      appClosingAuction: false,
+      appSessionEnd: '15:30',
+      last1m: '15:29',
+    });
+    expect(body[fut]).toMatchObject({ appSessionEnd: '15:40', last1m: '15:39' });
+    expect(body['NSE:NOPE']).toEqual({ error: 'not in the instrument list' });
+  });
 });

@@ -179,6 +179,7 @@ export class AuthService extends EventEmitter<{ change: [AuthStatus] }> {
 
   private drop(reason: LoggedOutReason | null, message?: string): void {
     const changed = this.current !== null || this.reason !== reason || this.message !== message;
+    if (this.current) this.opts.log.info({ reason, message }, 'Kite session ended');
     clearTimeout(this.expiryTimer);
     this.expiryTimer = undefined;
     this.current = null;

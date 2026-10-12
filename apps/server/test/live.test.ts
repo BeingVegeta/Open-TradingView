@@ -215,6 +215,28 @@ describe('live candles over /ws (mock market at 30x)', { timeout: 30_000 }, () =
     await until(() => !m.ticker.desired().has(m.instruments.get('NSE:INFY')!.token));
   });
 
+  it('snapshots the latest tick per instrument for the closing checks', async () => {
+    const { wsUrl } = await setup(10);
+    const c = connect(wsUrl);
+    await c.open;
+    c.ws.send(JSON.stringify({ type: 'subscribe', sub: 'a', key: 'NSE:INFY', tf: '1m' }));
+    await until(() => c.msgs.some((x) => x.type === 'bars' && !x.replace));
+    const base = wsUrl.replace('ws://', 'http://').replace('/ws', '');
+    const get = async () =>
+      (await (await fetch(`${base}/api/dev/ticks?keys=NSE:INFY,NSE:TCS`)).json()) as Record<
+        string,
+        Record<string, unknown>
+      >;
+    const first = await get();
+    expect(first['NSE:INFY']).toMatchObject({ appPhase: 'open', mode: 'full' });
+    expect(first['NSE:INFY']!.volumeSincePreviousRequest).toBeNull();
+    expect(first['NSE:TCS']).toEqual({ error: 'no ticks: open it on a chart or watchlist first' });
+    await new Promise((r) => setTimeout(r, 1500));
+    const second = await get();
+    expect(second['NSE:INFY']!.volumeSincePreviousRequest).toBeGreaterThan(0);
+    expect(JSON.stringify(second)).not.toMatch(/lastPrice|"price"/);
+  });
+
   it('reports live-vs-Kite candle differences and per-exchange anchoring', async () => {
     const { wsUrl, m } = await setup(10);
     const c = connect(wsUrl);

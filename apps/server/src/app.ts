@@ -145,7 +145,14 @@ export async function buildApp(deps: AppDeps): Promise<App> {
   });
   registerAuthRoutes(server, { config, auth, gateway });
   registerMarketRoutes(server, { auth, instruments, sync, history });
-  registerDiagnosticRoutes(server, { auth, instruments, history, ticker, live });
+  registerDiagnosticRoutes(server, {
+    auth,
+    instruments,
+    history,
+    ticker,
+    live,
+    clock: marketClock,
+  });
   registerUserRoutes(server, {
     watchlists: new WatchlistStore(db),
     prefs: new PrefsStore(db),

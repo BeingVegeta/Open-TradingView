@@ -2,6 +2,8 @@ import {
   DAY_MS,
   formatIstDateTime,
   getTimeframe,
+  instrumentPhase,
+  instrumentSession,
   istStartOfDay,
   type Candle,
   type Instrument,
@@ -14,6 +16,7 @@ import type { HistoryService } from '../history/historyService';
 import type { InstrumentStore } from '../instruments/instrumentStore';
 import { toKiteError } from '../kite/errors';
 import type { LiveCandles } from '../live/liveCandles';
+import type { Clock } from '../kite/clock';
 import type { TickerManager } from '../ticker/tickerManager';
 
 /** Nearest-expiry future of an underlying on an exchange. */
@@ -39,9 +42,23 @@ export function registerDiagnosticRoutes(
     history: HistoryService;
     ticker: TickerManager;
     live: LiveCandles;
+    /** Market clock (shifted in mock and replay mode). */
+    clock: Clock;
   },
 ): void {
-  const { auth, instruments, history, ticker, live } = deps;
+  const { auth, instruments, history, ticker, live, clock } = deps;
+
+  /** Instruments named in `?keys=A,B` (up to 8), or null if none were given. */
+  const keysParam = (q: { keys?: string }) =>
+    q.keys
+      ? q.keys
+          .split(',')
+          .map((k) => k.trim())
+          .filter(Boolean)
+          .slice(0, 8)
+      : null;
+  const hm = (minutes: number) =>
+    `${String(Math.floor(minutes / 60)).padStart(2, '0')}:${String(minutes % 60).padStart(2, '0')}`;
 
   app.get('/api/dev/diagnostics', async (_req, reply) => {
     reply.header('cache-control', 'no-store');
@@ -56,20 +73,26 @@ export function registerDiagnosticRoutes(
    * last complete trading day, and whether the daily volume equals the sum of
    * the 1-minute volumes. Uses history only, so it works any time.
    */
-  app.get('/api/dev/aggregation', async (_req, reply) => {
+  app.get<{ Querystring: { keys?: string } }>('/api/dev/aggregation', async (req, reply) => {
     const session = auth.session();
     if (!session) return reply.code(401).send({ error: 'logged_out' });
-    const picks = [
-      instruments.get('NSE:RELIANCE'),
-      instruments.get('NSE:HDFCBANK'),
-      instruments.get('NSE:NIFTY 50'),
-      nearestFuture(instruments, 'NIFTY', 'NFO'),
-      nearestFuture(instruments, 'CRUDEOIL', 'MCX'),
-    ];
+    const asked = keysParam(req.query);
+    const picks = asked
+      ? asked.map((k) => instruments.get(k))
+      : [
+          instruments.get('NSE:RELIANCE'),
+          instruments.get('NSE:HDFCBANK'),
+          instruments.get('NSE:NIFTY 50'),
+          nearestFuture(instruments, 'NIFTY', 'NFO'),
+          nearestFuture(instruments, 'CRUDEOIL', 'MCX'),
+        ];
     const hhmm = (t: number) => formatIstDateTime(t * 1000).slice(11, 16);
     const out: Record<string, unknown> = {};
-    for (const inst of picks) {
-      if (!inst) continue;
+    for (const [i, inst] of picks.entries()) {
+      if (!inst) {
+        if (asked) out[asked[i]!] = { error: 'not in the instrument list' };
+        continue;
+      }
       try {
         const get = (tf: TimeframeId, before: number, limit: number) =>
           history
@@ -85,6 +108,9 @@ export function registerDiagnosticRoutes(
         const sum = (from: number, to: number) => ones.filter((c) => c.time >= from && c.time < to);
         const report: Record<string, unknown> = {
           day: formatIstDateTime(day.time * 1000).slice(0, 10),
+          // What the app assumes, to compare with Kite's last 1-minute candle.
+          appClosingAuction: !!inst.closingAuction,
+          appSessionEnd: hm(instrumentSession(inst).close),
           oneMinuteCandles: ones.length,
           first1m: ones[0] ? hhmm(ones[0].time) : null,
           last1m: ones.at(-1) ? hhmm(ones.at(-1)!.time) : null,
@@ -136,6 +162,55 @@ export function registerDiagnosticRoutes(
       what: "Kite's 1h/30m/15m candles on the last complete day vs the 1-minute candles of the same day; daily volume vs the sum of 1-minute volumes.",
       ...out,
     };
+  });
+
+  /**
+   * The latest tick of each instrument in `?keys=` (they must be on an open chart
+   * or watchlist to be streaming): its times, cumulative day volume and how much
+   * it changed since the previous request, and whether the price moved. Polled
+   * around the close, it shows when the closing auction's volume and price
+   * arrive. No prices are included.
+   */
+  const previous = new Map<string, { volume?: number; price: number }>();
+  app.get<{ Querystring: { keys?: string } }>('/api/dev/ticks', async (req, reply) => {
+    const keys = keysParam(req.query);
+    if (!keys)
+      return reply.code(400).send({ error: 'bad_request', message: 'use ?keys=NSE:INFY,…' });
+    const now = clock.now();
+    const t = (s: number | undefined) => (s ? formatIstDateTime(s * 1000).slice(11, 19) : null);
+    const out: Record<string, unknown> = {};
+    for (const key of keys) {
+      const inst = instruments.get(key);
+      if (!inst) {
+        out[key] = { error: 'not in the instrument list' };
+        continue;
+      }
+      const tick = ticker.lastTick(inst.token);
+      if (!tick) {
+        out[key] = { error: 'no ticks: open it on a chart or watchlist first' };
+        continue;
+      }
+      const prev = previous.get(key);
+      previous.set(key, {
+        ...(tick.volume !== undefined ? { volume: tick.volume } : {}),
+        price: tick.lastPrice,
+      });
+      out[key] = {
+        appPhase: instrumentPhase(inst, now),
+        mode: tick.mode,
+        received: t(Math.floor(tick.receivedAt / 1000)),
+        exchangeTime: t(tick.exchangeTime),
+        lastTradeTime: t(tick.lastTradeTime),
+        dayVolume: tick.volume ?? null,
+        volumeSincePreviousRequest:
+          prev?.volume !== undefined && tick.volume !== undefined
+            ? tick.volume - prev.volume
+            : null,
+        priceMovedSincePreviousRequest: prev ? prev.price !== tick.lastPrice : null,
+      };
+    }
+    reply.header('cache-control', 'no-store');
+    return { at: formatIstDateTime(now).slice(11, 19), ...out };
   });
 
   app.get('/api/dev/anchoring', async (_req, reply) => {
