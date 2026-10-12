@@ -76,7 +76,13 @@ export async function registerClientHub(
           // Authoritative bars go out immediately and supersede pending live updates for them.
           const p = c.pending.get(sub);
           for (const b of e.bars) p?.delete(b.time);
-          send(c, { type: 'bars', sub, bars: e.bars, replace: true });
+          send(c, {
+            type: 'bars',
+            sub,
+            bars: e.bars,
+            replace: true,
+            ...(e.range ? { range: e.range } : {}),
+          });
           continue;
         }
         let p = c.pending.get(sub);

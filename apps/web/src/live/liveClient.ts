@@ -1,4 +1,11 @@
-import type { Candle, ClientMessage, LiveStatus, Quote, ServerMessage } from '@otv/shared';
+import type {
+  BarRange,
+  Candle,
+  ClientMessage,
+  LiveStatus,
+  Quote,
+  ServerMessage,
+} from '@otv/shared';
 import { create } from 'zustand';
 import { useAuth } from '../auth/authStore';
 
@@ -13,7 +20,7 @@ interface LiveState {
 
 export const useLive = create<LiveState>(() => ({ conn: 'closed', live: null, liveAt: 0 }));
 
-type BarsHandler = (bars: Candle[], replace: boolean) => void;
+type BarsHandler = (bars: Candle[], replace: boolean, range?: BarRange) => void;
 
 interface Sub {
   key: string;
@@ -175,7 +182,7 @@ class LiveClient {
         useLive.setState({ live: m.live, liveAt: performance.now() });
         break;
       case 'bars':
-        this.subs.get(m.sub)?.onBars(m.bars, !!m.replace);
+        this.subs.get(m.sub)?.onBars(m.bars, !!m.replace, m.range);
         break;
       case 'quotes':
         this.watches.get(m.sub)?.onQuotes(m.quotes);

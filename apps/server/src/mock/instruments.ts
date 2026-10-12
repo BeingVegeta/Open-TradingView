@@ -129,7 +129,10 @@ export function mockInstruments(nowMs: number): MockInstrument[] {
   const out: MockInstrument[] = [];
   const add = (
     i: Omit<Instrument, 'key' | 'token'>,
-    spec: Omit<SynthSpec, 'seed' | 'exchange' | 'tickSize' | 'listedOn' | 'delistedAfter'> & {
+    spec: Omit<
+      SynthSpec,
+      'seed' | 'exchange' | 'segment' | 'tickSize' | 'listedOn' | 'delistedAfter'
+    > & {
       seedKey?: string;
       listedOn?: number;
       delistedAfter?: number;
@@ -141,6 +144,7 @@ export function mockInstruments(nowMs: number): MockInstrument[] {
       spec: {
         seed: stringSeed(spec.seedKey ?? key),
         exchange: i.exchange,
+        segment: i.segment,
         basePrice: spec.basePrice,
         dailyVol: spec.dailyVol,
         volumePerMinute: spec.volumePerMinute,

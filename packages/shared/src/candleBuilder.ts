@@ -1,5 +1,5 @@
 import type { Candle } from './market';
-import { bucketStart, exchangeSession } from './sessions';
+import { bucketStart, exchangeSession, regularSession, type ExchangeSession } from './sessions';
 import { istStartOfDay, MINUTE_MS } from './time';
 import { tickTime, type Tick } from './ticks';
 
@@ -47,11 +47,18 @@ export class CandleBuilder {
   private lastCum: number | null = null;
   private lastCumDay: number | null = null;
 
+  /** Minutes after IST midnight during which ticks make candles. */
+  readonly session: ExchangeSession;
+
   constructor(
     readonly exchange: string,
     /** Bar length in minutes, or 'day'. */
     readonly bar: number | 'day',
-  ) {}
+    /** Trading session for this instrument (default: `regularSession(exchange)`). */
+    session?: ExchangeSession,
+  ) {
+    this.session = session ?? regularSession(exchange);
+  }
 
   get current(): Candle | null {
     return this.cur ? { ...this.cur } : null;
@@ -65,7 +72,7 @@ export class CandleBuilder {
   /** Whether a time falls inside the regular session (always true for day bars). */
   inSession(epochS: number): boolean {
     if (this.bar === 'day') return true;
-    const s = exchangeSession(this.exchange);
+    const s = this.session;
     const minutes = (epochS * 1000 - istStartOfDay(epochS * 1000)) / MINUTE_MS;
     return minutes >= s.open && minutes < s.close;
   }

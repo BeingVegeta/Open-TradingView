@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { CandleBuilder, marketPhase, type BuilderTick } from './candleBuilder';
+import { regularSession } from './sessions';
 import { formatIstDateTime, istToEpoch } from './time';
 
 /** IST wall-clock → epoch seconds on Mon 12 Oct 2026. */
@@ -80,14 +81,27 @@ describe('CandleBuilder: intraday bars', () => {
     expect(current!.volume).toBe(320);
   });
 
-  it('ignores ticks after the close (closing session, after hours)', () => {
+  it('ends cash stocks at 15:15 (closing auction) and ignores later ticks', () => {
     const b = new CandleBuilder('NSE', 5);
-    run(b, [tk(at(15, 29, 50), 200, 90_000)]);
-    const r = b.apply(tk(at(15, 30, 0), 201, 95_000));
-    expect(r).toBeNull();
-    const r2 = b.apply(tk(at(15, 45, 0), 202, 97_000));
-    expect(r2).toBeNull();
-    expect(b.current).toMatchObject({ close: 200 });
+    run(b, [tk(at(15, 14, 50), 200, 90_000)]);
+    // Closing auction (SEBI CAS): its trades are not part of any candle.
+    expect(b.apply(tk(at(15, 15, 0), 201, 95_000))).toBeNull();
+    expect(b.apply(tk(at(15, 30, 0), 202, 97_000))).toBeNull();
+    expect(b.current).toMatchObject({ close: 200, volume: 0 });
+  });
+
+  it('keeps F&O trading until 15:40 and indices until 15:30', () => {
+    const fut = new CandleBuilder('NFO', 5);
+    expect(fut.apply(tk(at(15, 39, 0), 300, 10))!.current.time).toBe(at(15, 35, 0));
+    expect(fut.apply(tk(at(15, 40, 0), 301, 20))).toBeNull();
+    const idx = new CandleBuilder('NSE', 5, regularSession('NSE', 'INDICES'));
+    expect(idx.apply(tk(at(15, 29, 0), 25000, 0))!.current.time).toBe(at(15, 25, 0));
+    expect(idx.apply(tk(at(15, 30, 0), 25001, 0))).toBeNull();
+  });
+
+  it('uses an explicit session when given one', () => {
+    const b = new CandleBuilder('NSE', 1, { open: 9 * 60 + 15, close: 15 * 60 + 30 });
+    expect(b.apply(tk(at(15, 20, 0), 200, 10))).not.toBeNull();
   });
 
   it('ignores stale ticks whose last trade is older than the forming bar', () => {
@@ -152,7 +166,8 @@ describe('CandleBuilder: intraday bars', () => {
       ['NSE', 60, at(10, 14, 59), '09:15:00'],
       ['NSE', 60, at(10, 15, 0), '10:15:00'],
       ['NSE', 30, at(9, 46, 0), '09:45:00'],
-      ['NSE', 15, at(15, 29, 0), '15:15:00'],
+      ['NSE', 15, at(15, 14, 0), '15:00:00'],
+      ['NFO', 15, at(15, 39, 0), '15:30:00'],
       ['NSE', 10, at(9, 24, 59), '09:15:00'],
       ['NSE', 3, at(9, 18, 0), '09:18:00'],
       ['BSE', 60, at(11, 20, 0), '11:15:00'],

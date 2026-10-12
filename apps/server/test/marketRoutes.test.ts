@@ -89,7 +89,7 @@ describe('market routes', () => {
 });
 
 describe('aggregation diagnostic', () => {
-  it('in mock mode, intraday candles match their 1-minute candles and the day volume includes the pre-open', async () => {
+  it('in mock mode, intraday candles match their 1-minute candles and the day volume includes the auctions', async () => {
     const { m } = await loggedIn();
     const r = await m.server.inject({ url: '/api/dev/aggregation', headers: HOST });
     expect(r.statusCode).toBe(200);
@@ -99,15 +99,7 @@ describe('aggregation diagnostic', () => {
       { allMatchOwnPeriod?: boolean; times?: string[] }
     > & { dayCandleVolume: number; sumOf1mVolumes: number };
     expect(rel['1h']!.allMatchOwnPeriod).toBe(true);
-    expect(rel['1h']!.times).toEqual([
-      '09:15',
-      '10:15',
-      '11:15',
-      '12:15',
-      '13:15',
-      '14:15',
-      '15:15',
-    ]);
+    expect(rel['1h']!.times).toEqual(['09:15', '10:15', '11:15', '12:15', '13:15', '14:15']);
     expect(rel['15m']!.allMatchOwnPeriod).toBe(true);
     expect(rel.dayCandleVolume).toBeGreaterThan(rel.sumOf1mVolumes);
   });

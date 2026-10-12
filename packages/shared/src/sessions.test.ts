@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { aggregateCandles, parseKiteTimestamp } from './aggregate';
 import type { Candle } from './market';
 import { priceDecimals } from './market';
-import { bucketStart } from './sessions';
+import { bucketStart, extendSessionTo, regularSession } from './sessions';
 import { formatIstDateTime, istToEpoch } from './time';
 
 const ist = (h: number, m: number, day = 12) => istToEpoch(2026, 10, day, h, m);
@@ -83,5 +83,31 @@ describe('priceDecimals', () => {
     expect(priceDecimals(0.0025)).toBe(4);
     expect(priceDecimals(1)).toBe(0);
     expect(priceDecimals(0.01)).toBe(2);
+  });
+});
+
+describe('regularSession (closing auction session)', () => {
+  const hhmm = (m: number) => `${Math.floor(m / 60)}:${String(m % 60).padStart(2, '0')}`;
+  it('ends cash stocks at 15:15, indices at 15:30 and F&O at 15:40', () => {
+    expect(hhmm(regularSession('NSE', 'NSE').close)).toBe('15:15');
+    expect(hhmm(regularSession('BSE', 'BSE').close)).toBe('15:15');
+    expect(hhmm(regularSession('NSE', 'INDICES').close)).toBe('15:30');
+    expect(hhmm(regularSession('BSE', 'INDICES').close)).toBe('15:30');
+    expect(hhmm(regularSession('NFO', 'NFO-FUT').close)).toBe('15:40');
+    expect(hhmm(regularSession('MCX', 'MCX-FUT').close)).toBe('23:55');
+    expect(hhmm(regularSession('NSE', 'NSE').open)).toBe('9:15');
+  });
+
+  it('extends (never shortens) the close to cover the last candle of a day', () => {
+    const cash = regularSession('NSE', 'NSE');
+    const last = (h: number, m: number) => istToEpoch(2026, 10, 9, h, m) / 1000;
+    // A stock still trading continuously until 15:30.
+    expect(hhmm(extendSessionTo(cash, last(15, 29)).close)).toBe('15:30');
+    expect(extendSessionTo(cash, last(15, 14))).toEqual(cash);
+    // Illiquid: last trade early. Unchanged.
+    expect(extendSessionTo(cash, last(14, 2))).toEqual(cash);
+    // Implausibly late (e.g. a special session): unchanged.
+    expect(extendSessionTo(cash, last(18, 0))).toEqual(cash);
+    expect(extendSessionTo(cash, undefined)).toEqual(cash);
   });
 });

@@ -1,8 +1,8 @@
 import {
   DAY_MS,
-  exchangeSession,
   istStartOfDay,
   MINUTE_MS,
+  regularSession,
   toIstParts,
   type Candle,
 } from '@otv/shared';
@@ -11,6 +11,8 @@ import { gauss, rand01, walkNoise } from './random';
 export interface SynthSpec {
   seed: number;
   exchange: string;
+  /** Kite segment; decides the session (INDICES run to 15:30, cash stocks to 15:15). */
+  segment: string;
   basePrice: number;
   /** Typical daily move as a fraction (0.015 = 1.5%). */
   dailyVol: number;
@@ -66,11 +68,11 @@ const PATH_CACHE_MAX = 5000;
 
 /** The intraday price path for a trading day: a Brownian bridge from the open to the close. */
 function dayPath(spec: SynthSpec, dayStartMs: number): DayPath {
-  const ck = `${spec.seed}:${dayStartMs}`;
+  const sess = regularSession(spec.exchange, spec.segment);
+  const n = sess.close - sess.open;
+  const ck = `${spec.seed}:${dayStartMs}:${n}`;
   const hit = pathCache.get(ck);
   if (hit) return hit;
-  const sess = exchangeSession(spec.exchange);
-  const n = sess.close - sess.open;
   const d = dayIndex(dayStartMs);
   const close = level(spec, d);
   const open = level(spec, d - 1) * (1 + gauss(spec.seed, d, 77) * spec.dailyVol * 0.25);
@@ -111,8 +113,9 @@ export function dayCandles(spec: SynthSpec, fromMs: number, toMs: number, nowMs:
         high: -Infinity,
         low: Infinity,
         close: mins.at(-1)!.close,
-        // The day's total includes the pre-open auction (assumed; /api/dev/aggregation checks it live).
-        volume: preOpenVolume(spec, day),
+        // Like Kite, the day's total includes the pre-open and closing auctions,
+        // which no minute candle carries (checked live with /api/dev/aggregation).
+        volume: preOpenVolume(spec, day) + closingAuctionVolume(spec, day),
       };
       for (const m of mins) {
         if (m.high > c.high) c.high = m.high;
@@ -132,9 +135,28 @@ export function dayCandles(spec: SynthSpec, fromMs: number, toMs: number, nowMs:
 
 /** Shares matched in the 09:00–09:08 pre-open auction (NSE/BSE cash market only). */
 export function preOpenVolume(spec: SynthSpec, dayIndexOrStart: number): number {
-  if (spec.volumePerMinute <= 0 || (spec.exchange !== 'NSE' && spec.exchange !== 'BSE')) return 0;
+  if (!hasCashAuctions(spec)) return 0;
   const d = dayIndexOrStart > 1e9 ? dayIndex(dayIndexOrStart) : dayIndexOrStart;
   return Math.round(spec.volumePerMinute * 6 * (0.5 + rand01(spec.seed, d, 4242)));
+}
+
+/**
+ * Shares matched in the closing auction session (SEBI's CAS, NSE/BSE cash market):
+ * continuous trading ends at 15:15 and the closing price is discovered by an auction
+ * until about 15:30. Its volume shows up only in the cumulative day volume.
+ */
+export function closingAuctionVolume(spec: SynthSpec, dayIndexOrStart: number): number {
+  if (!hasCashAuctions(spec)) return 0;
+  const d = dayIndexOrStart > 1e9 ? dayIndex(dayIndexOrStart) : dayIndexOrStart;
+  return Math.round(spec.volumePerMinute * 8 * (0.5 + rand01(spec.seed, d, 4343)));
+}
+
+export function hasCashAuctions(spec: SynthSpec): boolean {
+  return (
+    spec.volumePerMinute > 0 &&
+    spec.segment !== 'INDICES' &&
+    (spec.exchange === 'NSE' || spec.exchange === 'BSE')
+  );
 }
 
 /** One-minute candles in [fromMs, toMs), excluding minutes that start after `nowMs`. */
@@ -146,7 +168,7 @@ export function minuteCandles(
 ): Candle[] {
   const out: Candle[] = [];
   const end = Math.min(toMs, nowMs + 1, spec.delistedAfter);
-  const sess = exchangeSession(spec.exchange);
+  const sess = regularSession(spec.exchange, spec.segment);
   for (let day = istStartOfDay(Math.max(fromMs, spec.listedOn)); day < end; day += DAY_MS) {
     if (!isMockTradingDay(day)) continue;
     const { px, minutes } = dayPath(spec, day);

@@ -1,4 +1,10 @@
-import { CandleBuilder, istToEpoch, type Candle } from '@otv/shared';
+import {
+  CandleBuilder,
+  formatIstDateTime,
+  istToEpoch,
+  regularSession,
+  type Candle,
+} from '@otv/shared';
 import { describe, expect, it } from 'vitest';
 import { MockKiteGateway } from '../src/kite/mockGateway';
 import { RateLimiter } from '../src/kite/rateLimiter';
@@ -29,7 +35,11 @@ function build(
   stepS = 1,
 ): Candle[] {
   const m = byKey.get(key)!;
-  const b = new CandleBuilder(m.instrument.exchange, bar);
+  const b = new CandleBuilder(
+    m.instrument.exchange,
+    bar,
+    regularSession(m.instrument.exchange, m.instrument.segment),
+  );
   const bars: Candle[] = [];
   const warmup = bar === 'day' ? 0 : 60 * 60_000;
   for (let t = fromMs - warmup; t < toMs; t += stepS * 1000) {
@@ -86,6 +96,22 @@ describe('synthetic ticks → candle builder reproduce the mock history', () => 
     );
   });
 
+  it('closes each segment at its own time (stocks 15:15, indices 15:30, F&O 15:40)', async () => {
+    const from = istToEpoch(2026, 10, 12, 15, 0);
+    const to = istToEpoch(2026, 10, 12, 16, 0);
+    const fut = universe.find(
+      (m) => m.instrument.key.startsWith('NFO:NIFTY') && m.instrument.instrumentType === 'FUT',
+    )!.instrument.key;
+    const lastBar = (key: string) => {
+      const bars = build(key, 1, from, to);
+      return formatIstDateTime(bars.at(-1)!.time * 1000).slice(11, 16);
+    };
+    expect(lastBar('NSE:INFY')).toBe('15:14');
+    expect(lastBar('NSE:NIFTY 50')).toBe('15:29');
+    expect(lastBar(fut)).toBe('15:39');
+    expect(build(fut, 1, from, to)).toEqual(await history(fut, 'minute', from, to));
+  });
+
   it('index bars (no volume) and futures with OI', async () => {
     const from = istToEpoch(2026, 10, 12, 10, 0);
     const to = istToEpoch(2026, 10, 12, 10, 30);
@@ -110,7 +136,8 @@ describe('synthetic ticks → candle builder reproduce the mock history', () => 
       'NSE:TCS',
       'day',
       istToEpoch(2026, 10, 12),
-      istToEpoch(2026, 10, 12, 15, 30),
+      // Past 15:30, so the closing auction's volume is in the day total.
+      istToEpoch(2026, 10, 12, 15, 31),
       1,
     );
     const [hist] = await history(

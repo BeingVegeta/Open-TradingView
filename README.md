@@ -88,12 +88,26 @@ as each period starts, on every timeframe.
 - The server holds **one** connection to Kite's live feed and shares it between all browser
   tabs; your browser only talks to the local server. Chart updates are sent about 6–7 times a
   second.
-- Candles start at the session open (NSE 09:15, MCX and currency 09:00). Pre-open and
-  after-close ticks never create candles; the pre-open auction volume counts towards the first
-  candle of the day. A candle's volume is the change in Kite's cumulative day volume.
+- Candles follow the hours Kite's own candles cover, which differ by segment since SEBI's
+  closing auction session (checked against live Kite data, Oct 2026):
+
+  | Segment                     | Candles                                            |
+  | --------------------------- | -------------------------------------------------- |
+  | NSE/BSE stocks              | 09:15–15:15 (then the closing auction until 15:30) |
+  | Indices                     | 09:15–15:30                                        |
+  | NFO/BFO futures and options | 09:15–15:40                                        |
+  | MCX                         | 09:00–23:30 (23:55 in winter)                      |
+  | Currency                    | 09:00–17:00                                        |
+
+  Pre-open and closing-auction trades never make candles, but their volume is in the day
+  candle (as in Kite's). If a stock's previous day ran later than this (for example, one that
+  isn't part of the closing auction), the app follows that stock's hours.
+
+- A candle's volume is the change in Kite's cumulative day volume.
 - Live candles are approximations (Kite sends throttled snapshots, not every trade). About 10
   seconds after each candle closes, and after any reconnect, the app re-fetches the recent
-  candles from Kite and replaces its own, so network drops leave no gaps or duplicates.
+  candles from Kite and replaces its own, so network drops leave no gaps or duplicates. A live
+  candle Kite doesn't have (a minute later) is removed.
 - The status pill in the top bar shows **Live**, **Market closed**, **Pre-open**,
   **Reconnecting** (Kite connection dropped; retries with backoff), **Offline** (lost the local
   server; reconnects by itself) or **No ticks** (in session but nothing arriving, e.g. a

@@ -1,8 +1,8 @@
 import {
   DAY_MS,
-  exchangeSession,
   istStartOfDay,
   MINUTE_MS,
+  regularSession,
   type Candle,
   type DepthLevel,
   type Tick,
@@ -10,7 +10,13 @@ import {
 } from '@otv/shared';
 import type { MockInstrument } from './instruments';
 import { hash32, rand01 } from './random';
-import { dayCandles, isMockTradingDay, minuteCandles, preOpenVolume } from './synth';
+import {
+  closingAuctionVolume,
+  dayCandles,
+  isMockTradingDay,
+  minuteCandles,
+  preOpenVolume,
+} from './synth';
 
 interface DayState {
   minutes: Candle[];
@@ -21,12 +27,15 @@ interface DayState {
   highBefore: number[];
   lowBefore: number[];
   preOpen: number;
+  /** Closing auction volume (NSE/BSE cash), matched at 15:30. */
+  auction: number;
   prevClose: number;
   sessionOpen: number;
 }
 
 const PRE_OPEN_MIN = 9 * 60;
 const PRE_OPEN_MATCH_MIN = 9 * 60 + 8;
+const CLOSING_AUCTION_MATCH_MIN = 15 * 60 + 30;
 
 function roundTick(p: number, tick: number): number {
   return Math.round(Math.round(p / tick) * tick * 1e6) / 1e6;
@@ -36,9 +45,10 @@ function roundTick(p: number, tick: number): number {
  * Ticks that follow the mock history exactly: within each minute the price
  * walks from the candle's open through its high and low to its close, and the
  * cumulative day volume grows so that, sampled once a second, the ticks rebuild
- * the historical 1-minute candles precisely. Includes pre-open auction ticks
- * (NSE/BSE cash) and closing-session ticks after 15:30, which must not end up
- * in regular candles. Outside trading hours it emits frozen snapshots.
+ * the historical 1-minute candles precisely. Includes the pre-open auction
+ * (NSE/BSE cash) and, since SEBI's closing auction session, the 15:15–15:30
+ * closing auction for cash stocks; neither may end up in regular candles.
+ * Outside trading hours it emits frozen snapshots.
  */
 export class SyntheticTicks {
   private readonly days = new Map<string, DayState>();
@@ -60,7 +70,7 @@ export class SyntheticTicks {
   tickAt(m: MockInstrument, mode: TickMode, nowMs: number): Tick | null {
     const { spec, instrument } = m;
     const tradable = instrument.segment !== 'INDICES';
-    const sess = exchangeSession(spec.exchange);
+    const sess = regularSession(spec.exchange, spec.segment);
     let day = istStartOfDay(nowMs);
     let minuteOfDay = (nowMs - day) / MINUTE_MS;
     // Before today's activity, or on a holiday: show the last session's final state.
@@ -94,16 +104,15 @@ export class SyntheticTicks {
       ltt = Math.min(nowS, Math.floor((day + PRE_OPEN_MATCH_MIN * MINUTE_MS) / 1000));
       high = low = price;
     } else if (minuteOfDay >= sess.close) {
-      // After the close (closing session trades, then frozen).
+      // After continuous trading. Cash stocks then go through the closing auction:
+      // its volume is matched at 15:30 and only ever shows in the day total.
       const last = st.minutes[n - 1]!;
       price = last.close;
-      const post = Math.min(20, Math.max(0, minuteOfDay - sess.close - 10));
-      cum =
-        st.preOpen +
-        st.cumBefore[n - 1]! +
-        st.vols[n - 1]! +
-        Math.round(spec.volumePerMinute * 0.3 * post);
-      ltt = Math.floor((day + (sess.close + 10 + post) * MINUTE_MS) / 1000);
+      const matched = st.auction > 0 && minuteOfDay >= CLOSING_AUCTION_MATCH_MIN;
+      cum = st.preOpen + st.cumBefore[n - 1]! + st.vols[n - 1]! + (matched ? st.auction : 0);
+      ltt = matched
+        ? Math.floor((day + CLOSING_AUCTION_MATCH_MIN * MINUTE_MS) / 1000)
+        : last.time + 59;
       high = Math.max(st.highBefore[n - 1]!, last.high);
       low = Math.min(st.lowBefore[n - 1]!, last.low);
       oi = last.oi;
@@ -193,8 +202,9 @@ export class SyntheticTicks {
       highBefore,
       lowBefore,
       preOpen,
+      auction: closingAuctionVolume(m.spec, day),
       prevClose: prev?.close ?? minutes[0]!.open,
-      sessionOpen: day + exchangeSession(m.spec.exchange).open * MINUTE_MS,
+      sessionOpen: day + regularSession(m.spec.exchange, m.spec.segment).open * MINUTE_MS,
     };
     if (this.days.size > 500) this.days.clear();
     this.days.set(key, st);

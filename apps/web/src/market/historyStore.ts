@@ -1,4 +1,4 @@
-import type { Candle, HistoryResponse } from '@otv/shared';
+import { dropUnconfirmed, type BarRange, type Candle, type HistoryResponse } from '@otv/shared';
 import { api, qs } from '../api';
 
 export interface SeriesState {
@@ -117,11 +117,18 @@ class HistoryStore {
    * Returns 'tail' if only the last bar changed or bars were appended, 'all'
    * if earlier bars changed, or null if nothing changed.
    */
-  applyBars(key: string, tf: string, bars: Candle[]): 'tail' | 'all' | null {
+  applyBars(key: string, tf: string, bars: Candle[], range?: BarRange): 'tail' | 'all' | null {
     const s = this.series.get(HistoryStore.id(key, tf));
-    if (!s || !bars.length) return null;
-    const c = s.candles;
+    if (!s) return null;
     let result: 'tail' | 'all' | null = null;
+    if (range) {
+      // Authoritative range: drop bars Kite doesn't have (e.g. live bars outside the session).
+      const before = s.candles.length;
+      s.candles = dropUnconfirmed(s.candles, bars, range);
+      if (s.candles.length !== before) result = 'all';
+    }
+    if (!bars.length) return result;
+    const c = s.candles;
     for (const b of [...bars].sort((x, y) => x.time - y.time)) {
       const last = c.at(-1);
       if (!last || b.time > last.time) {

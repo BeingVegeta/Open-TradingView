@@ -293,9 +293,9 @@ export function ChartView({ instrument, tf }: { instrument: Instrument; tf: Time
     return liveClient.subscribe(
       key,
       tf,
-      (bars) => {
+      (bars, _replace, range) => {
         const lastBefore = historyStore.get(key, tf)?.candles.at(-1)?.time ?? -Infinity;
-        const change = historyStore.applyBars(key, tf, bars);
+        const change = historyStore.applyBars(key, tf, bars, range);
         if (change === 'all') {
           const s = historyStore.get(key, tf);
           if (s) render(s, false);

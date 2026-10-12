@@ -1,7 +1,13 @@
 import { EventEmitter } from 'node:events';
 import {
   CandleBuilder,
+  dropUnconfirmed,
+  extendSessionTo,
   getTimeframe,
+  istStartOfDay,
+  regularSession,
+  type BarRange,
+  type ExchangeSession,
   type Candle,
   type Instrument,
   type Tick,
@@ -43,6 +49,8 @@ export interface BarsEvent {
   bars: Candle[];
   /** Authoritative bars from Kite's history (overwrite), rather than live updates. */
   replace: boolean;
+  /** With `replace`: Kite's bars are complete for [from, to); other bars in it must go. */
+  range?: BarRange;
 }
 
 /**
@@ -58,6 +66,8 @@ export class LiveCandles extends EventEmitter<{ bars: [BarsEvent] }> {
   /** Live-built vs Kite comparison (see /api/dev/diagnostics). */
   readonly diagnostics = new LiveDiagnostics();
   private readonly series = new Map<string, Series>();
+  /** Learned session per instrument, per IST day. */
+  private readonly sessions = new Map<string, ExchangeSession>();
   private readonly byToken = new Map<number, Set<Series>>();
 
   constructor(
@@ -95,7 +105,11 @@ export class LiveCandles extends EventEmitter<{ bars: [BarsEvent] }> {
         id,
         inst,
         tf,
-        builder: new CandleBuilder(inst.exchange, tf.bar),
+        builder: new CandleBuilder(
+          inst.exchange,
+          tf.bar,
+          regularSession(inst.exchange, inst.segment),
+        ),
         consumers: new Set(),
         recent: [],
         seeded: false,
@@ -132,6 +146,10 @@ export class LiveCandles extends EventEmitter<{ bars: [BarsEvent] }> {
   }
 
   private async start(s: Series): Promise<void> {
+    if (s.tf.bar !== 'day') {
+      const session = await this.sessionFor(s.inst);
+      s.builder = new CandleBuilder(s.inst.exchange, s.tf.bar, session);
+    }
     // Seed first, then stream: the builder continues from Kite's newest bar.
     await this.reconcile(s, true);
     if (!this.series.has(s.id)) return;
@@ -140,6 +158,45 @@ export class LiveCandles extends EventEmitter<{ bars: [BarsEvent] }> {
     set.add(s);
     this.deps.ticker.acquire(`series:${s.id}`, s.inst.token, 'full');
     this.scheduleReconcile(s);
+  }
+
+  /**
+   * The instrument's trading session: the segment default (see `regularSession`),
+   * extended when its last complete day of 1-minute candles ran later (up to 30
+   * minutes), e.g. a stock that isn't part of the closing auction session.
+   */
+  private async sessionFor(inst: Instrument): Promise<ExchangeSession> {
+    const base = regularSession(inst.exchange, inst.segment);
+    const today = istStartOfDay(this.deps.clock.now()) / 1000;
+    const cacheKey = `${inst.key}@${today}`;
+    const hit = this.sessions.get(cacheKey);
+    if (hit) return hit;
+    const session = this.deps.auth.session();
+    if (!session) return base;
+    let learned = base;
+    try {
+      const res = await this.deps.history.getBefore(
+        session.accessToken,
+        inst,
+        getTimeframe('1m')!,
+        {
+          before: today,
+          limit: 1,
+          priority: 'low',
+        },
+      );
+      learned = extendSessionTo(base, res.candles.at(-1)?.time);
+    } catch {
+      // Keep the default.
+    }
+    if (learned.close !== base.close) {
+      this.deps.log.info(
+        { key: inst.key, defaultClose: base.close, learnedClose: learned.close },
+        'Session close differs from the default',
+      );
+    }
+    this.sessions.set(cacheKey, learned);
+    return learned;
   }
 
   private onTicks(ticks: Tick[]): void {
@@ -188,7 +245,11 @@ export class LiveCandles extends EventEmitter<{ bars: [BarsEvent] }> {
       return;
     }
     if (!this.series.has(s.id)) return;
-    const forming = s.builder.current;
+    // The builder's bar is still forming only until its period ends; after that
+    // (the session's last bar, or an illiquid instrument) Kite's version wins.
+    const nowS = Math.floor(this.deps.clock.now() / 1000);
+    const latest = s.builder.current;
+    const forming = latest && latest.time + barS > nowS ? latest : null;
     const closedFromKite = kite.filter((c) => !forming || c.time < forming.time);
     const newest = kite.at(-1);
     if (reseed || !s.seeded) {
@@ -207,9 +268,18 @@ export class LiveCandles extends EventEmitter<{ bars: [BarsEvent] }> {
     }
     const replace =
       reseed || !forming ? kite.slice(-RECENT_BARS) : closedFromKite.slice(-RECENT_BARS);
-    if (!replace.length) return;
+    // Kite's answer is complete for the bars we send, up to the forming bar: a live
+    // bar it doesn't have (e.g. built from ticks outside the session) must not
+    // survive. Bars that closed under a minute ago are spared in case Kite's
+    // history hasn't caught up yet; the next reconcile settles them.
+    const range: BarRange = {
+      from: replace[0]?.time ?? from,
+      to: Math.min(s.builder.current?.time ?? nowS, nowS - barS - 60 + 1),
+    };
+    s.recent = dropUnconfirmed(s.recent, kite, range);
     for (const b of replace) this.remember(s, b);
-    this.emit('bars', { series: s.id, bars: replace, replace: true });
+    if (!replace.length && !s.recent.length) return;
+    this.emit('bars', { series: s.id, bars: replace, replace: true, range });
   }
 
   private scheduleReconcile(s: Series): void {
