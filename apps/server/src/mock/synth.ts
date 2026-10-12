@@ -111,7 +111,8 @@ export function dayCandles(spec: SynthSpec, fromMs: number, toMs: number, nowMs:
         high: -Infinity,
         low: Infinity,
         close: mins.at(-1)!.close,
-        volume: 0,
+        // The day's total includes the pre-open auction (assumed; /api/dev/aggregation checks it live).
+        volume: preOpenVolume(spec, day),
       };
       for (const m of mins) {
         if (m.high > c.high) c.high = m.high;
@@ -172,9 +173,9 @@ export function minuteCandles(
         spec.volumePerMinute > 0
           ? Math.round(spec.volumePerMinute * shape * Math.exp(0.6 * gauss(spec.seed, d, i, 9)))
           : 0;
-      // Kite folds the pre-open auction volume into the day's first candle (assumed; verify live).
-      const v = i === 0 ? volume + preOpenVolume(spec, d) : volume;
-      const candle: Candle = { time: t / 1000, open: o, high: h, low: l, close: c, volume: v };
+      // Like Kite, candles exclude the pre-open auction volume (it is only in the
+      // cumulative day volume carried by ticks).
+      const candle: Candle = { time: t / 1000, open: o, high: h, low: l, close: c, volume };
       if (spec.oiBase > 0) {
         candle.oi = Math.round(
           spec.oiBase *

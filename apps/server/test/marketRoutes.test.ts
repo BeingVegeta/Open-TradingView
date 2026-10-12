@@ -87,3 +87,28 @@ describe('market routes', () => {
     expect(r.json().error).toBe('upstream_unavailable');
   });
 });
+
+describe('aggregation diagnostic', () => {
+  it('in mock mode, intraday candles match their 1-minute candles and the day volume includes the pre-open', async () => {
+    const { m } = await loggedIn();
+    const r = await m.server.inject({ url: '/api/dev/aggregation', headers: HOST });
+    expect(r.statusCode).toBe(200);
+    const body = r.json() as Record<string, Record<string, unknown>>;
+    const rel = body['NSE:RELIANCE']! as Record<
+      string,
+      { allMatchOwnPeriod?: boolean; times?: string[] }
+    > & { dayCandleVolume: number; sumOf1mVolumes: number };
+    expect(rel['1h']!.allMatchOwnPeriod).toBe(true);
+    expect(rel['1h']!.times).toEqual([
+      '09:15',
+      '10:15',
+      '11:15',
+      '12:15',
+      '13:15',
+      '14:15',
+      '15:15',
+    ]);
+    expect(rel['15m']!.allMatchOwnPeriod).toBe(true);
+    expect(rel.dayCandleVolume).toBeGreaterThan(rel.sumOf1mVolumes);
+  });
+});

@@ -14,7 +14,7 @@ import { dayCandles, isMockTradingDay, minuteCandles, preOpenVolume } from './sy
 
 interface DayState {
   minutes: Candle[];
-  /** Session volume of each minute (the first minute's pre-open share removed). */
+  /** Volume of each minute (candles exclude the pre-open auction). */
   vols: number[];
   /** Cumulative session volume before minute i. */
   cumBefore: number[];
@@ -170,7 +170,7 @@ export class SyntheticTicks {
     const minutes = minuteCandles(m.spec, day, day + DAY_MS, Number.MAX_SAFE_INTEGER);
     if (!minutes.length) return null;
     const preOpen = preOpenVolume(m.spec, day);
-    const vols = minutes.map((c, i) => (i === 0 ? c.volume - preOpen : c.volume));
+    const vols = minutes.map((c) => c.volume);
     const cumBefore: number[] = [];
     const highBefore: number[] = [];
     const lowBefore: number[] = [];

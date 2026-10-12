@@ -1,4 +1,13 @@
-import { formatIstDateTime, getTimeframe, type Instrument, type Tick } from '@otv/shared';
+import {
+  DAY_MS,
+  formatIstDateTime,
+  getTimeframe,
+  istStartOfDay,
+  type Candle,
+  type Instrument,
+  type Tick,
+  type TimeframeId,
+} from '@otv/shared';
 import type { FastifyInstance } from 'fastify';
 import type { AuthService } from '../auth/authService';
 import type { HistoryService } from '../history/historyService';
@@ -39,6 +48,93 @@ export function registerDiagnosticRoutes(
     return {
       what: 'Live-built candles compared with Kite historical candles for the same period (live − Kite). Prices in ticks.',
       ...live.diagnostics.report(),
+    };
+  });
+
+  /**
+   * Which 1-minute candles make up each of Kite's 15/30/60-minute candles on the
+   * last complete trading day, and whether the daily volume equals the sum of
+   * the 1-minute volumes. Uses history only, so it works any time.
+   */
+  app.get('/api/dev/aggregation', async (_req, reply) => {
+    const session = auth.session();
+    if (!session) return reply.code(401).send({ error: 'logged_out' });
+    const picks = [
+      instruments.get('NSE:RELIANCE'),
+      instruments.get('NSE:HDFCBANK'),
+      instruments.get('NSE:NIFTY 50'),
+      nearestFuture(instruments, 'NIFTY', 'NFO'),
+      nearestFuture(instruments, 'CRUDEOIL', 'MCX'),
+    ];
+    const hhmm = (t: number) => formatIstDateTime(t * 1000).slice(11, 16);
+    const out: Record<string, unknown> = {};
+    for (const inst of picks) {
+      if (!inst) continue;
+      try {
+        const get = (tf: TimeframeId, before: number, limit: number) =>
+          history
+            .getBefore(session.accessToken, inst, getTimeframe(tf)!, { before, limit })
+            .then((r) => r.candles);
+        // Last complete trading day: the newest daily candle before today.
+        const today = istStartOfDay(Date.now()) / 1000;
+        const days = await get('1D', today, 3);
+        const day = days.at(-1);
+        if (!day) continue;
+        const dayEnd = day.time + DAY_MS / 1000;
+        const ones = (await get('1m', dayEnd, 1000)).filter((c) => c.time >= day.time);
+        const sum = (from: number, to: number) => ones.filter((c) => c.time >= from && c.time < to);
+        const report: Record<string, unknown> = {
+          day: formatIstDateTime(day.time * 1000).slice(0, 10),
+          oneMinuteCandles: ones.length,
+          first1m: ones[0] ? hhmm(ones[0].time) : null,
+          last1m: ones.at(-1) ? hhmm(ones.at(-1)!.time) : null,
+          dayCandleVolume: day.volume,
+          sumOf1mVolumes: ones.reduce((a, c) => a + c.volume, 0),
+        };
+        for (const [tf, len] of [
+          ['1h', 60],
+          ['30m', 30],
+          ['15m', 15],
+        ] as const) {
+          const bars = (await get(tf, dayEnd, 60)).filter((c) => c.time >= day.time);
+          const rows = bars.map((k: Candle, i) => {
+            const next = bars[i + 1]?.time ?? dayEnd;
+            const natural = sum(k.time, k.time + len * 60);
+            const untilNext = sum(k.time, next);
+            const vol = (cs: Candle[]) => cs.reduce((a, c) => a + c.volume, 0);
+            const hi = (cs: Candle[]) => Math.max(...cs.map((c) => c.high));
+            return {
+              t: hhmm(k.time),
+              kiteVolume: k.volume,
+              sum1mOwnPeriod: vol(natural),
+              sum1mUntilNextCandle: vol(untilNext),
+              lastMinuteIncluded: untilNext.at(-1) ? hhmm(untilNext.at(-1)!.time) : null,
+              highMatches:
+                k.high === hi(untilNext)
+                  ? 'untilNext'
+                  : k.high === hi(natural)
+                    ? 'ownPeriod'
+                    : 'neither',
+            };
+          });
+          report[tf] = {
+            times: bars.map((b) => hhmm(b.time)),
+            allMatchOwnPeriod: rows.every((r) => r.kiteVolume === r.sum1mOwnPeriod),
+            allMatchUntilNext: rows.every((r) => r.kiteVolume === r.sum1mUntilNextCandle),
+            // The last two candles of the day are where sessions differ.
+            lastCandles: rows.slice(-2),
+            mismatches: rows.filter((r) => r.kiteVolume !== r.sum1mOwnPeriod).slice(0, 4),
+          };
+        }
+        out[inst.key] = report;
+      } catch (err) {
+        out[inst.key] = { error: toKiteError(err).message };
+      }
+    }
+    reply.header('cache-control', 'no-store');
+    return {
+      what: "Kite's 1h/30m/15m candles on the last complete day vs the 1-minute candles of the same day; daily volume vs the sum of 1-minute volumes.",
+      ...out,
     };
   });
 

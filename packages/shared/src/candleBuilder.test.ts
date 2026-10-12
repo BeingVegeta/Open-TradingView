@@ -45,7 +45,8 @@ describe('CandleBuilder: intraday bars', () => {
     ]);
     expect(closed).toHaveLength(1);
     expect(hhmm(closed[0]!.time)).toBe('09:15:00');
-    expect(closed[0]).toMatchObject({ open: 100, high: 101, low: 100, close: 101, volume: 1500 });
+    // Joined at 09:15:01 without earlier ticks: volume counts from the first tick.
+    expect(closed[0]).toMatchObject({ open: 100, high: 101, low: 100, close: 101, volume: 500 });
     expect(hhmm(current!.time)).toBe('09:20:00');
     expect(current).toMatchObject({ open: 102, close: 102, volume: 100 });
   });
@@ -61,13 +62,22 @@ describe('CandleBuilder: intraday bars', () => {
     expect(current).toMatchObject({ open: 50, high: 51, low: 49, close: 49, volume: 910 });
   });
 
-  it('starts the day at the session open with pre-open volume in the first bar', () => {
+  it('starts the day at the session open and leaves pre-open volume out (as Kite does)', () => {
     const b = new CandleBuilder('NSE', 1);
     const pre = run(b, [tk(at(9, 7, 30), 98, 5000), tk(at(9, 8, 0), 98.5, 5000)]);
     expect(pre.current).toBeUndefined(); // pre-open never makes a bar
     const { current } = run(b, [tk(at(9, 15, 0), 99, 6200), tk(at(9, 15, 30), 99.5, 6500)]);
     expect(hhmm(current!.time)).toBe('09:15:00');
-    expect(current).toMatchObject({ open: 99, high: 99.5, close: 99.5, volume: 6500 });
+    expect(current).toMatchObject({ open: 99, high: 99.5, close: 99.5, volume: 1500 });
+  });
+
+  it('without pre-open ticks, the first bar counts only trades from its first tick', () => {
+    const b = new CandleBuilder('NSE', 1);
+    const { current } = run(b, [
+      tk(at(9, 15, 1), 99, 6200, { lastQuantity: 20 }),
+      tk(at(9, 15, 30), 99.5, 6500),
+    ]);
+    expect(current!.volume).toBe(320);
   });
 
   it('ignores ticks after the close (closing session, after hours)', () => {

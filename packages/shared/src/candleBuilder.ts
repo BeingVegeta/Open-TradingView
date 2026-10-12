@@ -28,8 +28,8 @@ export interface BuilderResult {
  *
  * - Bars are session-anchored in IST (NSE 60-minute bars start 09:15, 10:15 …).
  * - Ticks outside the regular session (pre-open, closing session, after hours)
- *   never create or change intraday bars. Pre-open volume does count towards
- *   the first bar, because cumulative day volume already includes it.
+ *   never create or change intraday bars, and their volume (e.g. the pre-open
+ *   auction, included in the cumulative day volume) is not counted in any bar.
  * - Volume is cumulative-day-volume(now) − cumulative-day-volume(at bar start),
  *   never a sum of ticks.
  * - A tick whose trade time is older than the forming bar (no new trade) is ignored.
@@ -132,10 +132,10 @@ export class CandleBuilder {
   ): number | null {
     if (cum === undefined) return null;
     const day = istStartOfDay(t * 1000);
-    const sessionOpen = day / 1000 + exchangeSession(this.exchange).open * 60;
-    // The day's first bar includes the pre-open auction volume: start from zero.
-    if (b === sessionOpen) return 0;
-    // Otherwise everything up to the previous tick belonged to earlier bars.
+    // Everything up to the previous tick belonged to earlier bars — including the
+    // pre-open auction, which Kite's candles exclude (verified against live data:
+    // the day's cumulative volume exceeds the sum of its 1-minute candles by the
+    // pre-open volume).
     if (this.lastCum !== null && this.lastCumDay === day) return this.lastCum;
     // No earlier tick today (e.g. connected mid-session): only this tick's trade is ours.
     return Math.max(0, cum - (lastQty ?? 0));

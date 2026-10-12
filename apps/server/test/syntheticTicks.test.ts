@@ -74,7 +74,7 @@ describe('synthetic ticks → candle builder reproduce the mock history', () => 
       istToEpoch(2026, 10, 12, 9, 45),
     );
     expect(live).toEqual(hist);
-    expect(live[0]!.volume).toBeGreaterThan(hist[1]!.volume); // the first bar carries the pre-open volume
+    // The pre-open auction is in the ticks' day volume but not in the first candle.
   });
 
   it('5-minute and hourly bars across the close, ignoring post-close ticks', async () => {
