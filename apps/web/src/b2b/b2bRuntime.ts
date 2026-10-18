@@ -1,4 +1,5 @@
 import {
+  dropClosingPrints,
   formingIndexAt,
   runB2B,
   type B2BAlert,
@@ -67,6 +68,7 @@ export function useB2BRuntime(): void {
   const settings = useWorkspace((s) => s.b2b.settings);
   const instrument = useWorkspace((s) => (chart === null ? null : (s.instruments[chart] ?? null)));
   const key = instrument?.key ?? null;
+  const isIndex = instrument?.segment === 'INDICES';
 
   useEffect(() => {
     if (!key) {
@@ -85,7 +87,9 @@ export function useB2BRuntime(): void {
       if (!s?.candles.length) return;
       const candles = s.candles;
       const forming = formingIndexAt(candles, marketNowS());
-      const closed = forming >= 0 ? candles.slice(0, -1) : candles;
+      const all = forming >= 0 ? candles.slice(0, -1) : candles;
+      // Index candles end each day on the official close; see dropClosingPrints.
+      const closed = isIndex ? dropClosingPrints(all) : all;
       const last = candles.at(-1)!;
       const live = { time: last.time, close: last.close };
       const sig = signature(closed, settings);
@@ -150,5 +154,5 @@ export function useB2BRuntime(): void {
       off();
       unfollow?.();
     };
-  }, [key, settings]);
+  }, [key, settings, isIndex]);
 }

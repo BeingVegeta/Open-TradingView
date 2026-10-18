@@ -129,6 +129,19 @@ user's exchange and broker notices show SEBI's closing auction session (CAS):
   A mid-day change re-runs the whole day with the new settings; an open trade the new settings
   don't have is closed with the note "call withdrawn".
 
+- **Kite ends each day's index candles on the official close** (found on live data, 14–16 Oct
+  2026). On 16-Oct NIFTY traded near 23,120 until 15:27; Kite's 15:28 candle then jumps to the
+  official close, 23,146.15, which comes from the closing auction, not from trading, and 15:29
+  stays there. On 15-Oct the jump came about 15:26. TradingView's candles don't have it. The
+  jump broke every bear zone the script carried into the next day (header "live B/S 8/0" against
+  TradingView's "7/5"). For indices, the script (dashboard and paper trading) now ignores a
+  finished day's trailing candles from 15:20 on that sit on the day's last close; the chart still
+  shows Kite's candles as they are. On a day without the jump this drops only the 15:29 candle,
+  after the 15:15 square-off. The current day is left alone until the next one starts.
+- Even so, Kite's and TradingView's NIFTY 1-minute closes differ by about 0.05–0.5 points, so the
+  two call logs can differ by a minute, a strike or an extra call where a close is right at a
+  zone edge or a stop. On 16-Oct, 9 of the 11 calls compared matched in time and result.
+
 ## Paper trading
 
 - Runs on the server, on `NSE:NIFTY 50` 1m, independently of which chart the dashboard is attached

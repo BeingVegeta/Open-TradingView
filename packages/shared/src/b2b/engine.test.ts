@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import type { Candle } from '../market';
 import { istToEpoch } from '../time';
-import { ceStrike, fmt, peStrike, rsFmt, runB2B, sgn } from './engine';
+import { ceStrike, dropClosingPrints, fmt, peStrike, rsFmt, runB2B, sgn } from './engine';
 import { B2B_DEFAULTS, sanitizeB2BSettings, type B2BSettings } from './settings';
 import { b2bLogView, b2bStatusView, isNiftySymbol } from './view';
 
@@ -272,6 +272,42 @@ describe('N-B2B v1.8 engine', () => {
     const r = run([...setup(), [25020, 25021, 25004, 25005]], { measure: 'premium', deltaF: 0.5 });
     // A 10-point premium stop is 20 index points away at delta 0.5.
     expect(r.log[0]).toMatchObject({ sl: 25000, res: 'OPEN' });
+  });
+});
+
+describe('closing prints', () => {
+  /** One day's candles from `hh:mm` with the given closes. */
+  const day = (d: number, hh: number, mm: number, closes: number[]) =>
+    closes.map((c, i) => ({
+      time: istToEpoch(2026, 10, d, hh, mm + i) / 1000,
+      open: c,
+      high: c,
+      low: c,
+      close: c,
+      volume: 0,
+    }));
+  const times = (cs: readonly Candle[]) =>
+    cs.map((c) => new Date(c.time * 1000 + 19_800_000).toISOString().slice(8, 16));
+
+  it("drops a finished day's jump to the official close", () => {
+    // 16-Oct: trading to 15:27, then 15:28 and 15:29 on the official close.
+    const fri = day(16, 15, 25, [23120, 23121, 23122, 23146.15, 23146.15]);
+    const mon = day(19, 9, 15, [23100]);
+    expect(times(dropClosingPrints([...fri, ...mon]))).toEqual([
+      '16T15:25',
+      '16T15:26',
+      '16T15:27',
+      '19T09:15',
+    ]);
+  });
+
+  it('keeps a flat close before 15:20 and leaves the current day alone', () => {
+    const thu = day(15, 15, 18, [22990, 22990, 22990]); // 15:18-15:20 all equal
+    const fri = day(16, 15, 27, [23122, 23146.15, 23146.15]);
+    const out = dropClosingPrints([...thu, ...fri]);
+    expect(times(out)).toEqual(['15T15:18', '15T15:19', '16T15:27', '16T15:28', '16T15:29']);
+    const plain = day(16, 9, 15, [1, 2, 3]);
+    expect(dropClosingPrints(plain)).toBe(plain);
   });
 });
 

@@ -46,7 +46,18 @@ describe('paper trading (mock market at 60x)', { timeout: 60_000 }, () => {
 
     const trades = async () =>
       (await m.server.inject({ url: '/api/paper/trades', headers: HOST })).json() as PaperTrade[];
-    await until(async () => (await trades()).some((t) => t.status === 'closed'), 45_000);
+    const kinds = async () =>
+      (
+        (
+          await m.server.inject({ url: '/api/paper/events?day=2026-10-16', headers: HOST })
+        ).json() as { kind: string }[]
+      ).map((e) => e.kind);
+    // Events are stored after the trades of the same candle, which can wait on an option price.
+    await until(
+      async () =>
+        (await trades()).some((t) => t.status === 'closed') && (await kinds()).includes('EXIT'),
+      45_000,
+    );
     const [t] = await trades();
 
     // Only calls made after the trader started, on the strike and side the script named.

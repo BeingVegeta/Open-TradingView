@@ -1,5 +1,6 @@
 import { EventEmitter } from 'node:events';
 import {
+  dropClosingPrints,
   dropUnconfirmed,
   formatIstDateTime,
   getTimeframe,
@@ -233,7 +234,8 @@ export class PaperTrader extends EventEmitter<{ change: [] }> {
     const sig = `${closed.length}|${lastC.time}|${lastC.close}|${lastC.high}|${lastC.low}|${JSON.stringify(settings)}`;
     if (sig !== this.lastSig) {
       this.lastSig = sig;
-      const res = runB2B(closed, { settings });
+      // NIFTY's candles end each day on the official close; see dropClosingPrints.
+      const res = runB2B(dropClosingPrints(closed), { settings });
       this.lastBar = res.lastTime;
       if (this.seenUntil === null) {
         // Started (or restarted): don't trade calls from before we were watching.
