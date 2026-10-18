@@ -137,7 +137,8 @@ user's exchange and broker notices show SEBI's closing auction session (CAS):
   TradingView's "7/5"). For indices, the script (dashboard and paper trading) now ignores a
   finished day's trailing candles from 15:20 on that sit on the day's last close; the chart still
   shows Kite's candles as they are. On a day without the jump this drops only the 15:29 candle,
-  after the 15:15 square-off. The current day is left alone until the next one starts.
+  after the 15:15 square-off. A day is trimmed once it is over (after 15:30, or when the next one
+  starts), never while it is in session.
 - Even so, Kite's and TradingView's NIFTY 1-minute closes differ by about 0.05–0.5 points, so the
   two call logs can differ by a minute, a strike or an extra call where a close is right at a
   zone edge or a stop. On 16-Oct, 9 of the 11 calls compared matched in time and result.

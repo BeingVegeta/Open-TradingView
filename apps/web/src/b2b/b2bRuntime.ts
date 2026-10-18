@@ -86,10 +86,11 @@ export function useB2BRuntime(): void {
       const s = historyStore.get(key, TF);
       if (!s?.candles.length) return;
       const candles = s.candles;
-      const forming = formingIndexAt(candles, marketNowS());
+      const nowS = marketNowS();
+      const forming = formingIndexAt(candles, nowS);
       const all = forming >= 0 ? candles.slice(0, -1) : candles;
       // Index candles end each day on the official close; see dropClosingPrints.
-      const closed = isIndex ? dropClosingPrints(all) : all;
+      const closed = isIndex ? dropClosingPrints(all, nowS) : all;
       const last = candles.at(-1)!;
       const live = { time: last.time, close: last.close };
       const sig = signature(closed, settings);

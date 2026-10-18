@@ -852,6 +852,8 @@ export function formingIndexAt(candles: readonly Candle[], nowS: number, barS = 
 
 /** From this IST minute of the day, a run of candles at the day's final close is suspect. */
 const CLOSING_PRINT_FROM = 15 * 60 + 20;
+/** Index sessions end at 15:30 IST. */
+const SESSION_END_MS = (15 * 60 + 30) * 60_000;
 
 /**
  * Kite's 1-minute index candles end each day on the official closing value,
@@ -860,19 +862,22 @@ const CLOSING_PRINT_FROM = 15 * 60 + 20;
  * close of 23,146.15 and 15:29 stayed there. TradingView's candles don't have
  * the jump, and it breaks zones the script would carry into the next day.
  *
- * For every day that has a later day after it, this drops the trailing candles
- * from 15:20 on whose close equals the day's last close. On a day without the
- * jump that is just the 15:29 candle (after the 15:15 square-off). The current
- * day is left alone until the next one starts.
+ * For every finished day (a later day follows, or it is past 15:30 IST on that
+ * day at `nowS`), this drops the trailing candles from 15:20 on whose close
+ * equals the day's last close. On a day without the jump that is just the 15:29
+ * candle (after the 15:15 square-off). A day still in session is left alone.
  */
-export function dropClosingPrints<T extends Candle>(candles: readonly T[]): readonly T[] {
+export function dropClosingPrints<T extends Candle>(
+  candles: readonly T[],
+  nowS = -Infinity,
+): readonly T[] {
   let out: T[] | null = null;
   let end = candles.length; // exclusive end of the day being checked
   for (let i = candles.length - 1; i >= 0; i--) {
     const day = istStartOfDay(candles[i]!.time * 1000);
     if (i > 0 && istStartOfDay(candles[i - 1]!.time * 1000) === day) continue;
-    // candles[i..end) is one IST day; only trim it when a later day follows.
-    if (end < candles.length) {
+    // candles[i..end) is one IST day; only trim it once the day is over.
+    if (end < candles.length || nowS * 1000 >= day + SESSION_END_MS) {
       const last = candles[end - 1]!.close;
       let cut = end;
       while (cut > i) {

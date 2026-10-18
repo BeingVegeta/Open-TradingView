@@ -235,7 +235,7 @@ export class PaperTrader extends EventEmitter<{ change: [] }> {
     if (sig !== this.lastSig) {
       this.lastSig = sig;
       // NIFTY's candles end each day on the official close; see dropClosingPrints.
-      const res = runB2B(dropClosingPrints(closed), { settings });
+      const res = runB2B(dropClosingPrints(closed, nowS), { settings });
       this.lastBar = res.lastTime;
       if (this.seenUntil === null) {
         // Started (or restarted): don't trade calls from before we were watching.

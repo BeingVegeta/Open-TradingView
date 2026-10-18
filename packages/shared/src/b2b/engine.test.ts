@@ -309,6 +309,13 @@ describe('closing prints', () => {
     const plain = day(16, 9, 15, [1, 2, 3]);
     expect(dropClosingPrints(plain)).toBe(plain);
   });
+
+  it('trims the newest day once its session is over', () => {
+    const fri = day(16, 15, 27, [23122, 23146.15, 23146.15]);
+    const at = (h: number, m: number) => istToEpoch(2026, 10, 16, h, m) / 1000;
+    expect(dropClosingPrints(fri, at(15, 29))).toBe(fri);
+    expect(times(dropClosingPrints(fri, at(15, 30)))).toEqual(['16T15:27']);
+  });
 });
 
 describe('B2B settings', () => {
