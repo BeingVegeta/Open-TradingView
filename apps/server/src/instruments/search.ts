@@ -152,6 +152,11 @@ export class InstrumentIndex {
     return this.byKey.get(key);
   }
 
+  /** Every instrument (for scans such as an option chain). */
+  all(): IterableIterator<Instrument> {
+    return this.byKey.values();
+  }
+
   getByToken(token: number): Instrument | undefined {
     return this.byToken.get(token);
   }

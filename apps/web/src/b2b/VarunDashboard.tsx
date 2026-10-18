@@ -3,6 +3,7 @@ import { useState } from 'react';
 import { useWorkspace } from '../workspace/workspaceStore';
 import { useB2B } from './b2bRuntime';
 import { B2BSettingsDialog } from './B2BSettingsDialog';
+import { PaperPanel } from './PaperPanel';
 
 const Cell = ({ c, colSpan }: { c: B2BCell; colSpan?: number }) => (
   <td className={`b2b-${c.tone}`} colSpan={colSpan}>
@@ -25,6 +26,7 @@ export function VarunDashboard() {
   const { result, live, error, alerts } = useB2B();
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [alertsOpen, setAlertsOpen] = useState(false);
+  const [tab, setTab] = useState<'signals' | 'paper'>('signals');
   if (chartIdx === null) return null;
 
   const S = b2b.settings;
@@ -49,6 +51,27 @@ export function VarunDashboard() {
           {b2b.collapsed ? '▸' : '▾'}
         </button>
         <strong>Varun&apos;s dashboard</strong>
+        <div className="tf-group" role="tablist" aria-label="Dashboard view">
+          {(
+            [
+              ['signals', 'Signals'],
+              ['paper', 'Paper trading'],
+            ] as const
+          ).map(([id, label]) => (
+            <button
+              key={id}
+              role="tab"
+              aria-selected={tab === id}
+              className={`tf-btn ${tab === id ? 'tf-btn-on' : ''}`}
+              onClick={() => {
+                setTab(id);
+                setB2B({ collapsed: false });
+              }}
+            >
+              {label}
+            </button>
+          ))}
+        </div>
         <span className="muted">
           N-B2B v1.8 · chart {chartIdx + 1}
           {instrument ? ` · ${instrument.tradingsymbol}` : ''} · runs on 1-minute candles
@@ -87,7 +110,12 @@ export function VarunDashboard() {
           ✕
         </button>
       </header>
-      {!b2b.collapsed && (
+      {!b2b.collapsed && tab === 'paper' && (
+        <div className="b2b-body">
+          <PaperPanel />
+        </div>
+      )}
+      {!b2b.collapsed && tab === 'signals' && (
         <div className="b2b-body">
           {error && <div className="notice notice-warn">{error}</div>}
           {!error && !result && (

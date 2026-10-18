@@ -14,7 +14,8 @@ export async function makeApp(opts: Partial<AppDeps> = {}) {
   const config = opts.config ?? testConfig();
   const db = opts.db ?? openDb(':memory:');
   const gateway = opts.gateway ?? new MockKiteGateway();
-  const app = await buildApp({ logger: false, ...opts, config, db, gateway });
+  // The paper trader streams NIFTY on its own; only its own tests turn it on.
+  const app = await buildApp({ logger: false, paper: false, ...opts, config, db, gateway });
   return { ...app, db, config, gateway };
 }
 

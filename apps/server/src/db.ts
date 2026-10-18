@@ -80,6 +80,25 @@ const MIGRATIONS: string[] = [
      ikey TEXT PRIMARY KEY,
      json TEXT NOT NULL
    ) WITHOUT ROWID;`,
+  // 5: paper trades of Varun's N-B2B script, and every event it raised.
+  `CREATE TABLE paper_trades (
+     id          INTEGER PRIMARY KEY,
+     day         TEXT    NOT NULL,
+     signal_time INTEGER NOT NULL,
+     status      TEXT    NOT NULL,
+     json        TEXT    NOT NULL,
+     UNIQUE (day, signal_time)
+   );
+   CREATE INDEX paper_trades_day ON paper_trades (day);
+   CREATE TABLE paper_events (
+     id       INTEGER PRIMARY KEY,
+     at       INTEGER NOT NULL,
+     bar_time INTEGER,
+     trade_id INTEGER,
+     kind     TEXT    NOT NULL,
+     text     TEXT    NOT NULL
+   );
+   CREATE INDEX paper_events_at ON paper_events (at);`,
 ];
 
 export function migrate(db: Db): void {

@@ -15,6 +15,9 @@ import { registerGuards } from './http/guards';
 import { registerDiagnosticRoutes } from './http/diagnosticRoutes';
 import { registerMarketRoutes } from './http/marketRoutes';
 import { registerUserRoutes } from './http/userRoutes';
+import { PaperStore } from './paper/paperStore';
+import { registerPaperRoutes } from './paper/paperRoutes';
+import { PaperTrader } from './paper/paperTrader';
 import { DrawingStore } from './user/drawingStore';
 import { PrefsStore } from './user/prefsStore';
 import { WatchlistStore } from './user/watchlistStore';
@@ -38,6 +41,10 @@ export interface AppDeps {
   /** Ticker reconnect backoff floor (tests). */
   tickerBackoffMs?: number;
   reconcileDelayMs?: number;
+  /** How often the paper trader re-checks for a closed candle (tests). */
+  paperPollMs?: number;
+  /** Run the paper trader (default true; most tests turn it off). */
+  paper?: boolean;
   /** Lets the UI switch between live and mock data (see Runtime). */
   modeControl?: {
     info: () => ModeInfo;
@@ -54,6 +61,7 @@ export interface App {
   history: HistoryService;
   ticker: TickerManager;
   live: LiveCandles;
+  paper: PaperTrader;
 }
 
 /** Strips one-time tokens from URLs before they reach the log. */
@@ -153,11 +161,29 @@ export async function buildApp(deps: AppDeps): Promise<App> {
     live,
     clock: marketClock,
   });
+  const prefs = new PrefsStore(db);
   registerUserRoutes(server, {
     watchlists: new WatchlistStore(db),
-    prefs: new PrefsStore(db),
+    prefs,
     drawings: new DrawingStore(db),
   });
+  // Paper trading of Varun's script: simulated fills only, never orders.
+  const paperStore = new PaperStore(db);
+  const paper = new PaperTrader({
+    auth,
+    history,
+    live,
+    ticker,
+    instruments,
+    store: paperStore,
+    prefs,
+    clock: marketClock,
+    log: server.log,
+    ...(deps.paperPollMs ? { pollMs: deps.paperPollMs } : {}),
+    inactive: deps.paper === false,
+  });
+  server.addHook('onClose', async () => paper.stop());
+  registerPaperRoutes(server, { store: paperStore, trader: paper });
   await registerClientHub(server, {
     auth,
     ticker,
@@ -184,5 +210,6 @@ export async function buildApp(deps: AppDeps): Promise<App> {
     });
   }
 
-  return { server, auth, instruments, sync, history, ticker, live };
+  server.addHook('onReady', async () => paper.reconsider());
+  return { server, auth, instruments, sync, history, ticker, live, paper };
 }

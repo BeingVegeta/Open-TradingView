@@ -1404,3 +1404,139 @@ button {
   width: 90px;
   text-align: right;
 }
+
+/* Paper trading panel */
+.paper {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  font-size: 12px;
+}
+.paper-bar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+.paper-state {
+  color: var(--text-muted);
+}
+.paper-state-running {
+  color: var(--up);
+}
+.paper-state-error {
+  color: var(--down);
+}
+.paper-state-waiting-login,
+.paper-state-loading,
+.paper-state-waiting-instruments {
+  color: var(--warn);
+}
+.paper-expiry {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--text-muted);
+}
+.paper-expiry select {
+  background: var(--bg);
+  color: var(--text);
+  border: 1px solid var(--border-strong);
+  border-radius: 4px;
+  padding: 2px 4px;
+  font: inherit;
+}
+.paper-open {
+  margin: 0;
+  padding: 4px 8px;
+  border-left: 3px solid var(--warn);
+  background: var(--bg-elev-2);
+}
+.paper-cards {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(170px, 1fr));
+  gap: 6px;
+}
+.paper-card {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 6px 8px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--bg);
+}
+.paper-card span {
+  color: var(--text-muted);
+  font-size: 11px;
+}
+.paper-card b {
+  font: 600 15px var(--font-mono);
+}
+.paper-card small {
+  color: var(--text-faint);
+  font-size: 11px;
+}
+.paper .up {
+  color: var(--up);
+}
+.paper .down {
+  color: var(--down);
+}
+.paper-grid {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  align-items: flex-start;
+}
+.paper-grid h4 {
+  margin: 0 0 4px;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--text-muted);
+}
+.paper-equity {
+  width: 320px;
+  height: 70px;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+}
+.paper-zero {
+  stroke: var(--border-strong);
+  stroke-dasharray: 3 3;
+}
+.paper-line-up,
+.paper-line-down {
+  fill: none;
+  stroke-width: 1.5;
+  vector-effect: non-scaling-stroke;
+}
+.paper-line-up {
+  stroke: var(--up);
+}
+.paper-line-down {
+  stroke: var(--down);
+}
+.paper-note {
+  margin: 0;
+  max-width: 320px;
+}
+.paper-mini {
+  border-collapse: collapse;
+  font: 11px var(--font-mono);
+}
+.paper-mini th,
+.paper-mini td {
+  padding: 2px 8px;
+  text-align: right;
+  border-bottom: 1px solid var(--border);
+}
+.paper-mini th:first-child,
+.paper-mini td:first-child {
+  text-align: left;
+}
+.paper-mini th {
+  color: var(--text-muted);
+  font-weight: 500;
+}
