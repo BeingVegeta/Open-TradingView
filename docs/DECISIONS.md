@@ -107,3 +107,49 @@ user's exchange and broker notices show SEBI's closing auction session (CAS):
   <kbd>Alt</kbd>+<kbd>T</kbd>, so plain letters stay free for search.
 - Failed saves and loads (drawings, layout, watchlists, search) show a short notice rather than
   failing silently; the server-unreachable and logged-out states have their own screens.
+
+## Varun's dashboard (N-B2B v1.8 port)
+
+- The script is ported to TypeScript in `packages/shared/src/b2b/` and runs in the browser for the
+  dashboard and on the server for paper trading, so both see the same calls. Each closed bar is
+  processed in the script's order: new-day resets, pivots, new blocks, survival and breakers,
+  trimming, trade management, entries. Trades and zones change only on closed candles
+  (`barstate.isconfirmed`); live P&L comes from the forming candle, as the script's tables do.
+- It always runs on the instrument's 1m candles, whatever the chart's timeframe; the drawings show
+  only on a 1m chart. It starts from about 5,000 bars of history, while TradingView may start
+  further back, so zones carried over from older history can differ near the start of the data.
+  Calls on the current day should not depend on it.
+- Pivot ties: Pine's `ta.pivotlow`/`pivothigh` tie handling isn't documented. The port takes a
+  pivot when the bars to its left are strictly higher (lower for highs) and the bars to its right
+  are not lower. Unverified against TradingView: compare a day's call log (see LIVE_CHECKS).
+- `ta.atr` is an RMA of the true range seeded with a simple average, as in Pine. Labels are capped
+  at 300, like the script's `max_labels_count`.
+- The script's settings are saved with the layout on the server. The paper trader reads the same
+  settings, so changing them on the dashboard changes what is paper-traded from the next candle.
+  A mid-day change re-runs the whole day with the new settings; an open trade the new settings
+  don't have is closed with the note "call withdrawn".
+
+## Paper trading
+
+- Runs on the server, on `NSE:NIFTY 50` 1m, independently of which chart the dashboard is attached
+  to or whether a browser is open. Only calls made on candles that closed while it was running are
+  traded; calls missed while the app was off stay missed.
+- **On by default**, as asked ("from Monday"). The switch is in the Paper trading tab.
+- **Contract**: the strike the script names (in the money: the round figure below spot for calls,
+  above for puts) on the nearest NIFTY expiry that hasn't passed. "Next one on expiry day" in the
+  tab moves to the next expiry on expiry days. The lot size comes from Kite's instrument list (the
+  script's own lot-size input is used only for its ₹ figures, which are stored separately).
+- **Fills**: entry at the best offer, exits at the best bid, at the moment the trader sees the
+  closed candle (a second or two after the minute). If the option has no depth the last price is
+  used, with a note on the trade. A stop is therefore filled at the market after the candle closes,
+  not at the stop level; the script's own points are stored alongside so the slippage between the
+  two is visible. To have prices ready, it keeps the NIFTY options within four strikes of spot (CE
+  and PE, nearest expiry) subscribed in full mode.
+- **Costs** are estimates of Zerodha's charges for index options (₹20 an order, STT 0.1% on sells,
+  NSE transaction 0.03503%, SEBI fees, stamp 0.003% on buys, 18% GST). Each lot's exit counts as
+  its own order. They aren't editable in the UI yet; check them against a contract note.
+- After a restart, an open trade is carried on if the script still has it open; otherwise it is
+  closed at the current price with a note. A call that disappears after Kite's corrected candle
+  replaces the live one is closed the same way ("call withdrawn"). Trades never carry over to the
+  next day.
+- Metrics count closed trades only. A trade without an option price counts with the script's ₹.

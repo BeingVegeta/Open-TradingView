@@ -132,10 +132,33 @@ Use the four-chart layout on 1m. Before each test, note the time.
 - **Kite's rate-limit (429) and range-cap texts.** If the server log ever shows `Too many requests`
   or `Kite rejected the history range`, **send** that line. You don't need to provoke them.
 
+## 5. Varun's dashboard and paper trading (any trading day)
+
+Paper trading is on by default and needs nothing from you except `pnpm start` and the morning
+login before 09:30 IST (12:00 SGT), when the script's entry window opens. Leave it running until
+after 15:15 IST (17:45 SGT).
+
+1. **Is it running?** Open a NIFTY 50 chart, click **Varun B2B**, then the **Paper trading** tab.
+   It should say **Running**. If it says anything else, **send** a screenshot and the server log
+   lines containing `paper`.
+2. **Same calls as TradingView.** Set the chart to 1m. After the close, compare the **CALL LOG**
+   with the script's call log on TradingView for the same day, same settings. **Send** both
+   screenshots if any row differs (time, direction, strike, result). This checks the port,
+   including the pivot tie rule I couldn't verify.
+3. **Option fills.** In the Paper trading tab, pick two trades and compare their entry and exit
+   prices with the option's 1m candles on Kite. Fills happen a second or two after the signal
+   candle closes, so each should be close to the open of the next minute: a little above it for
+   entries (the offer), a little below for exits (the bid). **Send** the trades table screenshot
+   and anything that looks wrong (a wrong strike or expiry, a fill far from the candle, a note
+   saying "last price" or "no option price").
+4. **Charges.** If you have a contract note for any real NIFTY option trade, compare its charges
+   with the trade's costs for the same turnover. **Send** only the difference.
+
 ## What to send, in one place
 
 From section 1: the aggregation check if wrong, the Copy output of the switch timings, the
 tick-snapshot file, `/api/dev/diagnostics`, the two screenshots, and daily-candle numbers only if
 they differ. From section 2: the login-screen screenshot and log lines, the next-day aggregation,
 any `Session close differs` line, and 4h/W mismatches. From section 3: diagnostics, log lines and
-screenshots of any gap. From section 4: whatever you checked.
+screenshots of any gap. From section 4: whatever you checked. From section 5: the status if not Running, call-log
+differences, and fill or charge mismatches.

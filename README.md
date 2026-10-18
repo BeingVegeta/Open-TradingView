@@ -11,6 +11,7 @@ against your own [Zerodha Kite Connect](https://kite.trade/docs/connect/v3/) API
 
 > Status: all five milestones of v1 are built: login, search, historical and live charts on 12
 > timeframes, up to four charts, watchlists, indicators, market depth, drawings and saved layouts.
+> Since then: Varun's dashboard (a port of his N-B2B v1.8 script) with automatic paper trading.
 > The original brief is in [docs/BRIEF.md](docs/BRIEF.md) and every deviation from it in
 > [docs/DECISIONS.md](docs/DECISIONS.md).
 
@@ -92,6 +93,30 @@ page you land back in the app.
   on the server.
 - **Layout is restored** on reload: the charts and their symbols, timeframes and indicators,
   panel width and which panels are open, saved on the server.
+
+### Varun's dashboard and paper trading
+
+**Varun B2B** in the chart toolbar attaches Varun's dashboard to the active chart: a port of
+his "NIFTY 2-Lot Block-to-Block v1.8" TradingView script. It is meant for NIFTY 50 on 1m.
+
+- **Signals tab**: the script's STATUS and CALL LOG tables. The script always runs on the
+  instrument's **1-minute** candles (with about 5,000 bars of warm-up), whatever the chart's
+  timeframe. Its blocks, breakers, ghosts, entry/stop lines and labels are drawn on the chart
+  only when that chart is on 1m. Calls and exits are made on closed candles, as in the script.
+- **Settings** has every input of the script under the same groups and names, with a reset to
+  its defaults. **Alerts** shows the script's alert lines (CALL, LOT1, SLMOVE, EXIT) as notices
+  when they happen. **Labels** hides the chart labels.
+- **Paper trading tab**: the server trades every fresh call on paper: 2 lots of the NIFTY
+  option the script names (in-the-money strike, nearest expiry), bought at the live best offer
+  when the call's candle closes and each lot sold at the best bid when the script exits it.
+  **Nothing is sent to Kite.** It runs whenever `pnpm start` is running and you're logged in,
+  with or without a browser open, using the dashboard's current settings. It is **on by
+  default**; switch it off in the tab. Every trade and every alert line is stored, with
+  estimated Zerodha charges and a fingerprint of the settings used. The tab shows the results
+  for today, 7 days, 30 days or all time, and **CSV** downloads the trades.
+- Calls made while the app was off are not traded. A trade still open when the app restarts is
+  carried on if the script still has it open, otherwise closed at the current price with a
+  note.
 
 ### Live data
 
@@ -256,9 +281,10 @@ packages/shared  Types and pure logic shared by both: IST time, exchange session
 ### Data and secrets
 
 Everything local lives in `data/` (git-ignored): the SQLite database with your session, the
-instrument list, the candle cache, your watchlists and saved layout. Deleting `data/` resets
-the app (watchlists and layout included); everything else is rebuilt from Kite. `.env` and recorded tick files are
-git-ignored too. Do not commit any of them.
+instrument list, the candle cache, your watchlists, saved layout and paper trades. Deleting
+`data/` resets the app (watchlists, layout and the paper-trading record included); everything
+else is rebuilt from Kite. `.env` and recorded tick files are git-ignored too. Do not commit
+any of them.
 
 ### Security notes
 
@@ -276,6 +302,7 @@ stored unencrypted in `data/otv.sqlite`, which is created with owner-only permis
 4. ~~Terminal: watchlist, indicators, OHLC legend, market depth, restored layout~~
 5. ~~Polish: custom timeframes, multi-chart layout, drawing tools, keyboard search, empty and
    error states~~
+6. ~~Varun's dashboard (N-B2B v1.8) and automatic paper trading~~
 
 ## Licence and attribution
 
