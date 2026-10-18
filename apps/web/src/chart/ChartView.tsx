@@ -37,6 +37,8 @@ import {
 } from '../drawings/drawingsStore';
 import { chartCount, useWorkspace } from '../workspace/workspaceStore';
 import { fromChartTime, toChartCandle, toChartTime } from './chartTime';
+import { useB2B } from '../b2b/b2bRuntime';
+import { B2BLayer } from './b2bLayer';
 import { DrawingsPrimitive, type DrawingHit } from './drawingsPrimitive';
 import { IndicatorLayer } from './indicatorLayer';
 import { Legend, type LegendData } from './Legend';
@@ -101,6 +103,7 @@ export function ChartView({
   const volumeRef = useRef<ISeriesApi<'Histogram'> | null>(null);
   const layerRef = useRef<IndicatorLayer | null>(null);
   const drawRef = useRef<DrawingsPrimitive | null>(null);
+  const b2bRef = useRef<B2BLayer | null>(null);
   /** Bar time under the crosshair (epoch s), or null for the newest bar. */
   const hoverRef = useRef<number | null>(null);
   const indicators = useWorkspace((s) => s.charts[chartIndex]!.indicators);
@@ -167,6 +170,7 @@ export function ChartView({
     const drawings = new DrawingsPrimitive();
     candlesRef.current.attachPrimitive(drawings);
     drawRef.current = drawings;
+    b2bRef.current = new B2BLayer(candlesRef.current);
     if (import.meta.env.DEV) {
       // Inspection hook for development and browser tests.
       const w = window as unknown as { __otvDrawings?: DrawingsPrimitive[] };
@@ -177,6 +181,7 @@ export function ChartView({
       chartRef.current = null;
       layerRef.current = null;
       drawRef.current = null;
+      b2bRef.current = null;
     };
   }, []);
 
@@ -248,12 +253,12 @@ export function ChartView({
       );
       const t1 = performance.now();
       layerRef.current?.setData(s.candles);
-      drawRef.current?.setMapper(
-        new TimeMapper(s.candles, {
-          bar: getTimeframe(currentRef.current.tf)?.bar ?? 1,
-          session: instrumentSession(instrument),
-        }),
-      );
+      const mapper = new TimeMapper(s.candles, {
+        bar: getTimeframe(currentRef.current.tf)?.bar ?? 1,
+        session: instrumentSession(instrument),
+      });
+      drawRef.current?.setMapper(mapper);
+      b2bRef.current?.setMapper(mapper);
       const cost = { priceMs: t1 - t0, indicatorsMs: performance.now() - t1 };
       recordPerf({ type: 'render-cost', bars: s.candles.length, ...cost });
       // At the start of the instrument's history, don't let the view drift into empty space.
@@ -412,6 +417,19 @@ export function ChartView({
     ts.subscribeVisibleLogicalRangeChange(onRange);
     return () => ts.unsubscribeVisibleLogicalRangeChange(onRange);
   }, [instrument.key, tf]);
+
+  // Varun's dashboard draws its zones, calls and levels on the 1m chart it follows.
+  const b2bHere = useWorkspace((s) => s.b2b.chart === chartIndex) && tf === '1m';
+  const b2bResult = useB2B((s) => (s.key === instrument.key ? s.result : null));
+  const b2bLiveBar = useB2B((s) => s.live?.time ?? null);
+  const b2bLabels = useWorkspace((s) => s.b2b.labels);
+  useEffect(() => {
+    const layer = b2bRef.current;
+    if (!layer) return;
+    if (b2bHere && b2bResult && loadedId === seriesId)
+      layer.show(b2bResult, useB2B.getState().live, { labels: b2bLabels });
+    else layer.hide();
+  }, [b2bHere, b2bResult, b2bLiveBar, b2bLabels, loadedId, seriesId]);
 
   // Drawings: shown on every timeframe of the instrument.
   const drawings = useInstrumentDrawings(instrument.key);

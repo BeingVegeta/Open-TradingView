@@ -1,4 +1,12 @@
-import { getTimeframe, type Instrument, type Prefs, type TimeframeId } from '@otv/shared';
+import {
+  B2B_DEFAULTS,
+  getTimeframe,
+  sanitizeB2BSettings,
+  type B2BSettings,
+  type Instrument,
+  type Prefs,
+  type TimeframeId,
+} from '@otv/shared';
 import { create } from 'zustand';
 import { api } from '../api';
 import { failure, notify } from '../components/Toasts';
@@ -56,7 +64,25 @@ interface Saved {
   active: number;
   grid: GridId;
   layout: Layout;
+  b2b: B2BPrefs;
 }
+
+/** Varun's dashboard (the N-B2B v1.8 script): which chart it follows, and its inputs. */
+export interface B2BPrefs {
+  /** Chart index the dashboard follows, or null when it's closed. */
+  chart: number | null;
+  collapsed: boolean;
+  /** Show the script's labels (calls, bookings, exits) on the chart. */
+  labels: boolean;
+  settings: B2BSettings;
+}
+
+const DEFAULT_B2B: B2BPrefs = {
+  chart: null,
+  collapsed: false,
+  labels: true,
+  settings: B2B_DEFAULTS,
+};
 
 const DEFAULT_LAYOUT: Layout = {
   sidebarOpen: true,
@@ -73,6 +99,7 @@ const DEFAULTS: Saved = {
   active: 0,
   grid: '1',
   layout: DEFAULT_LAYOUT,
+  b2b: DEFAULT_B2B,
 };
 
 function sanitizeSlot(o: unknown, fallback: ChartSlot): ChartSlot {
@@ -111,6 +138,21 @@ function sanitize(p: Prefs | null | undefined): Saved {
     grid,
     active: active >= 0 && active < chartCount(grid) ? active : 0,
     layout,
+    b2b: sanitizeB2B(o.b2b),
+  };
+}
+
+function sanitizeB2B(v: unknown): B2BPrefs {
+  const o = (typeof v === 'object' && v ? v : {}) as Record<string, unknown>;
+  const chart =
+    Number.isInteger(o.chart) && (o.chart as number) >= 0 && (o.chart as number) < MAX_CHARTS
+      ? (o.chart as number)
+      : null;
+  return {
+    chart,
+    collapsed: o.collapsed === true,
+    labels: o.labels !== false,
+    settings: sanitizeB2BSettings(o.settings),
   };
 }
 
@@ -140,6 +182,7 @@ interface WorkspaceState extends Saved {
   setIndicators: (list: IndicatorConfig[], chart?: number) => void;
   setGrid: (grid: GridId) => void;
   setLayout: (patch: Partial<Layout>) => void;
+  setB2B: (patch: Partial<B2BPrefs>) => void;
 }
 
 export const useWorkspace = create<WorkspaceState>((set, get) => {
@@ -165,8 +208,18 @@ export const useWorkspace = create<WorkspaceState>((set, get) => {
     },
     setIndicators: (indicators, chart = get().active) =>
       set({ charts: patchChart(chart, { indicators }) }),
-    setGrid: (grid) => set({ grid, active: Math.min(get().active, chartCount(grid) - 1) }),
+    setGrid: (grid) => {
+      const n = chartCount(grid);
+      const b2b = get().b2b;
+      set({
+        grid,
+        active: Math.min(get().active, n - 1),
+        // The dashboard follows a chart that is still on screen.
+        ...(b2b.chart !== null && b2b.chart >= n ? { b2b: { ...b2b, chart: 0 } } : {}),
+      });
+    },
     setLayout: (patch) => set({ layout: { ...get().layout, ...patch } }),
+    setB2B: (patch) => set({ b2b: { ...get().b2b, ...patch } }),
   };
 });
 
@@ -182,6 +235,7 @@ const snapshot = (s: WorkspaceState): Saved => ({
   active: s.active,
   grid: s.grid,
   layout: s.layout,
+  b2b: s.b2b,
 });
 
 let saveTimer: number | undefined;

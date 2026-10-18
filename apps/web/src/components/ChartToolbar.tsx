@@ -44,6 +44,9 @@ export function ChartToolbar() {
   const setGrid = useWorkspace((s) => s.setGrid);
   const layout = useWorkspace((s) => s.layout);
   const setLayout = useWorkspace((s) => s.setLayout);
+  const active = useWorkspace((s) => s.active);
+  const b2bChart = useWorkspace((s) => s.b2b.chart);
+  const setB2B = useWorkspace((s) => s.setB2B);
   return (
     <div className="toolbar">
       {instrument && (
@@ -75,6 +78,17 @@ export function ChartToolbar() {
       <IndicatorMenu instrument={instrument} />
       <div className="toolbar-sep" />
       <DrawingTools />
+      <div className="toolbar-sep" />
+      <button
+        className={`tf-btn ${b2bChart === active ? 'tf-btn-on' : ''}`}
+        onClick={() =>
+          setB2B(b2bChart === active ? { chart: null } : { chart: active, collapsed: false })
+        }
+        title="Varun's dashboard: the N-B2B v1.8 script (2-lot block-to-block) on this chart's 1-minute candles"
+        aria-pressed={b2bChart === active}
+      >
+        Varun B2B
+      </button>
       <div className="toolbar-spacer" />
       <div className="tf-group" role="group" aria-label="Chart layout">
         {GRIDS.map((g) => (

@@ -3,6 +3,8 @@ import { useEffect, useState } from 'react';
 import { api, ApiError } from '../api';
 import { ChartView } from '../chart/ChartView';
 import { chartCount, DEFAULT_SYMBOL, useWorkspace } from '../workspace/workspaceStore';
+import { useB2BRuntime } from '../b2b/b2bRuntime';
+import { VarunDashboard } from '../b2b/VarunDashboard';
 import { ChartToolbar } from './ChartToolbar';
 import { notify } from './Toasts';
 
@@ -100,6 +102,7 @@ function ChartPane({ slot, framed }: { slot: number; framed: boolean }) {
 export function Workspace() {
   const grid = useWorkspace((s) => s.grid);
   const n = chartCount(grid);
+  useB2BRuntime();
   return (
     <main className="workspace">
       <ChartToolbar />
@@ -108,6 +111,7 @@ export function Workspace() {
           <ChartPane key={i} slot={i} framed={n > 1} />
         ))}
       </div>
+      <VarunDashboard />
     </main>
   );
 }

@@ -248,6 +248,8 @@ button {
 .workspace {
   flex: 1;
   min-height: 0;
+  /* Let wide content (the dashboard's tables) scroll inside instead of widening the page. */
+  min-width: 0;
   display: flex;
   flex-direction: column;
 }
@@ -328,7 +330,15 @@ button {
   border-bottom: 1px solid var(--border);
   background: var(--bg-elev);
   min-width: 0;
+  /* Narrow windows: scroll the toolbar rather than wrap its buttons. */
+  overflow-x: auto;
+  overflow-y: hidden;
+  scrollbar-width: thin;
 }
+.toolbar > * {
+  flex-shrink: 0;
+}
+
 .toolbar-symbol {
   display: flex;
   align-items: center;
@@ -343,6 +353,7 @@ button {
 .toolbar-name {
   overflow: hidden;
   text-overflow: ellipsis;
+  max-width: 180px;
 }
 .toolbar-sep {
   width: 1px;
@@ -359,6 +370,7 @@ button {
   gap: 2px;
 }
 .tf-btn {
+  white-space: nowrap;
   background: transparent;
   border: 0;
   color: var(--text-muted);
@@ -1224,4 +1236,171 @@ button {
 }
 .perf-slow td {
   color: var(--down);
+}
+
+/* Varun's dashboard (N-B2B v1.8). Table colours follow the script's. */
+.b2b {
+  flex: 0 0 auto;
+  min-width: 0;
+  max-height: 42vh;
+  display: flex;
+  flex-direction: column;
+  border-top: 1px solid var(--border-strong);
+  background: var(--bg-elev);
+}
+.b2b-bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 3px 8px;
+  font-size: 12px;
+  border-bottom: 1px solid var(--border);
+}
+.b2b-collapsed .b2b-bar {
+  border-bottom: 0;
+}
+.b2b-note {
+  color: var(--warn);
+  font-size: 11px;
+}
+.b2b-body {
+  overflow: auto;
+  padding: 6px 8px 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.b2b-wait {
+  margin: 4px 0;
+}
+.b2b-table {
+  border-collapse: collapse;
+  font: 11px var(--font-mono);
+  color: #fff;
+  width: max-content;
+  min-width: 100%;
+}
+.b2b-table td {
+  padding: 3px 7px;
+  border: 1px solid rgb(107 114 128 / 0.6);
+  white-space: nowrap;
+}
+.b2b-head td {
+  background: rgb(30 58 138 / 0.8);
+}
+.b2b-sub td {
+  background: rgb(55 65 81 / 0.8);
+}
+.b2b-row-win td {
+  background: rgb(15 118 110 / 0.8);
+}
+.b2b-row-loss td {
+  background: rgb(127 29 29 / 0.8);
+}
+.b2b-row-none td {
+  background: rgb(17 24 39 / 0.8);
+}
+.b2b-row-sub td {
+  background: rgb(55 65 81 / 0.8);
+}
+.b2b-table td.b2b-text {
+  color: #fff;
+}
+.b2b-table td.b2b-muted {
+  color: #9ca3af;
+}
+.b2b-table td.b2b-up {
+  color: #86efac;
+}
+.b2b-table td.b2b-down {
+  color: #fca5a5;
+}
+.b2b-table td.b2b-warn {
+  color: #f59e0b;
+}
+.b2b-table td.b2b-yellow {
+  color: #facc15;
+}
+.b2b-alerts {
+  max-height: 140px;
+  overflow: auto;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 4px 8px;
+}
+.b2b-alerts pre {
+  margin: 4px 0;
+  font: 11px var(--font-mono);
+  white-space: pre-wrap;
+  border-bottom: 1px dashed var(--border);
+  padding-bottom: 4px;
+}
+.b2b-alerts p {
+  margin: 4px 0;
+}
+
+/* Dialogs */
+.modal-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 70;
+  background: rgb(0 0 0 / 0.5);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 16px;
+}
+.modal {
+  background: var(--bg-elev);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius);
+  box-shadow: 0 12px 40px rgb(0 0 0 / 0.55);
+  width: min(640px, 100%);
+  max-height: calc(100vh - 32px);
+  display: flex;
+  flex-direction: column;
+}
+.modal-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 12px;
+  border-bottom: 1px solid var(--border);
+}
+.modal-body {
+  overflow: auto;
+  padding: 8px 12px 12px;
+}
+.b2b-settings fieldset {
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  margin: 8px 0 0;
+  padding: 6px 10px 8px;
+}
+.b2b-settings legend {
+  color: var(--text-muted);
+  font-size: 12px;
+  padding: 0 4px;
+}
+.b2b-settings label {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  font-size: 12px;
+  padding: 3px 0;
+}
+.b2b-settings input[type='number'],
+.b2b-settings select {
+  width: 190px;
+  background: var(--bg);
+  color: var(--text);
+  border: 1px solid var(--border-strong);
+  border-radius: 4px;
+  padding: 3px 6px;
+  font: inherit;
+}
+.b2b-settings input[type='number'] {
+  width: 90px;
+  text-align: right;
 }
