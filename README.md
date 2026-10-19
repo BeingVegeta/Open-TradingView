@@ -261,6 +261,12 @@ Open the app with `?perf=1` (e.g. `http://127.0.0.1:8787/?perf=1`) to see each t
 symbol switch's timing on screen and in the browser console, with a Copy button; `?perf=0` turns
 it off again.
 
+### Checking Varun's dashboard against TradingView
+
+`pnpm b2b:compare` runs the script on candles exported from TradingView, from Kite or from the
+app (`/api/paper/export?day=…`), and compares candles, the script's plots bar by bar and the
+call logs. See [docs/B2B_PARITY.md](docs/B2B_PARITY.md).
+
 ### Layout
 
 ```
