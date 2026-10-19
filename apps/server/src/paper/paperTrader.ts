@@ -112,6 +112,24 @@ export class PaperTrader extends EventEmitter<{ change: [] }> {
     };
   }
 
+  /** The script inputs it trades with: the dashboard's. */
+  settings(): B2BSettings {
+    return sanitizeB2BSettings(
+      (this.deps.prefs.get() as { b2b?: { settings?: unknown } }).b2b?.settings,
+    );
+  }
+
+  /** Today (IST, yyyy-mm-dd) on the trader's clock. */
+  today(): string {
+    return ymd(this.deps.clock.now());
+  }
+
+  /** The closed 1-minute candles it runs the script on (for parity checks). */
+  scriptCandles(): Candle[] {
+    const nowS = Math.floor(this.deps.clock.now() / 1000);
+    return this.candles.filter((c) => c.time + 60 <= nowS);
+  }
+
   /** Starts or stops to match the config and login. */
   reconsider(): void {
     if (this.deps.inactive) return;
@@ -227,9 +245,7 @@ export class PaperTrader extends EventEmitter<{ change: [] }> {
     const nowS = Math.floor(nowMs / 1000);
     const closed = this.candles.filter((c) => c.time + 60 <= nowS);
     if (!closed.length) return;
-    const settings = sanitizeB2BSettings(
-      (this.deps.prefs.get() as { b2b?: { settings?: unknown } }).b2b?.settings,
-    );
+    const settings = this.settings();
     const lastC = closed.at(-1)!;
     const sig = `${closed.length}|${lastC.time}|${lastC.close}|${lastC.high}|${lastC.low}|${JSON.stringify(settings)}`;
     if (sig !== this.lastSig) {

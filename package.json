@@ -17,7 +17,8 @@
     "typecheck": "pnpm -r typecheck",
     "test": "vitest run",
     "test:watch": "vitest",
-    "check": "pnpm lint && pnpm format:check && pnpm typecheck && pnpm test"
+    "check": "pnpm lint && pnpm format:check && pnpm typecheck && pnpm test",
+    "b2b:compare": "tsx apps/server/scripts/b2bCompare.ts"
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",

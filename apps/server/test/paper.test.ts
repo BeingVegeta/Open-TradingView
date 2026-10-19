@@ -2,6 +2,7 @@ import { istToEpoch, type PaperTrade } from '@otv/shared';
 import { afterEach, describe, expect, it } from 'vitest';
 import { MarketClock } from '../src/kite/marketClock';
 import { MockKiteGateway } from '../src/kite/mockGateway';
+import { matchApp, parseCandleFile, runScript } from '../src/b2b/compare';
 import { tradesCsv } from '../src/paper/paperRoutes';
 import { _test, settingsHash } from '../src/paper/paperTrader';
 import { B2B_DEFAULTS } from '@otv/shared';
@@ -93,6 +94,29 @@ describe('paper trading (mock market at 60x)', { timeout: 60_000 }, () => {
 
     const csv = (await m.server.inject({ url: '/api/paper/trades.csv', headers: HOST })).body;
     expect(csv.split('\n')[0]).toContain('entry_opt');
+
+    // The export replays: the script on the trader's own candles makes the same call.
+    const exp = await m.server.inject({ url: '/api/paper/export?day=2026-10-16', headers: HOST });
+    expect(exp.headers['content-disposition']).toContain('paper-2026-10-16.json');
+    const ex = exp.json() as { day: string; settingsHash: string; trades: PaperTrade[] };
+    expect(ex).toMatchObject({ day: '2026-10-16', settingsHash: settingsHash(B2B_DEFAULTS) });
+    expect(ex.trades.map((x) => x.id)).toContain(t!.id);
+    const { candles } = parseCandleFile(exp.body);
+    expect(candles.length).toBeGreaterThan(1000);
+    const replay = runScript(candles, {
+      day: '2026-10-16',
+      warmup: null,
+      trim: true,
+      settings: B2B_DEFAULTS,
+      pivotTie: 'older',
+    });
+    const row = matchApp(replay.res.log, ex.trades, '2026-10-16').find((r) => r.live?.id === t!.id);
+    expect(row!.offline).toBeDefined();
+    expect(row!.flag).not.toMatch(/LIVE ONLY|RESULT DIFFERS/);
+    expect(
+      (await m.server.inject({ url: '/api/paper/export?day=16-10-2026', headers: HOST }))
+        .statusCode,
+    ).toBe(400);
 
     // Turning it off stops it and releases its subscriptions.
     const off = await m.server.inject({

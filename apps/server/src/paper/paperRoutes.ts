@@ -1,7 +1,7 @@
 import { paperMetrics, type PaperConfig, type PaperTrade } from '@otv/shared';
 import type { FastifyInstance } from 'fastify';
 import type { PaperStore } from './paperStore';
-import type { PaperTrader } from './paperTrader';
+import { PAPER_UNDERLYING, settingsHash, type PaperTrader } from './paperTrader';
 
 const DAY = /^\d{4}-\d{2}-\d{2}$/;
 
@@ -104,8 +104,36 @@ export function registerPaperRoutes(
     const day = req.query.day;
     if (!day || !DAY.test(day))
       return reply.code(400).send({ error: 'bad_request', message: 'use ?day=yyyy-mm-dd' });
+    return dayEvents(day);
+  });
+
+  // One day's trades and events, the dashboard settings and the 1-minute candles
+  // the trader ran on: the input of `pnpm b2b:compare --app-log` (and --kite).
+  app.get<{ Querystring: { day?: string } }>('/api/paper/export', async (req, reply) => {
+    const q = req.query.day;
+    if (q !== undefined && !DAY.test(q))
+      return reply.code(400).send({ error: 'bad_request', message: 'use ?day=yyyy-mm-dd' });
+    const day = q ?? trader.today();
+    const settings = trader.settings();
+    reply.header('content-disposition', `attachment; filename="paper-${day}.json"`);
+    return {
+      kind: 'otv-paper-export',
+      version: 1,
+      day,
+      exportedAt: new Date().toISOString(),
+      underlying: PAPER_UNDERLYING,
+      settings,
+      settingsHash: settingsHash(settings),
+      status: trader.status(),
+      trades: store.trades(day, day),
+      events: dayEvents(day),
+      candles: trader.scriptCandles(),
+    };
+  });
+
+  function dayEvents(day: string) {
     const [y, m, d] = day.split('-').map(Number) as [number, number, number];
     const start = Date.UTC(y, m - 1, d) - 330 * 60_000;
     return store.events(start, start + 86_400_000);
-  });
+  }
 }
