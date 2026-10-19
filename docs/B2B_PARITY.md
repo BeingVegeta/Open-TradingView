@@ -104,18 +104,26 @@ TradingView plan.
   or remove it before exporting.
 - Export right after the session you want to check. The script ran on exactly the bars loaded
   on the chart, and the export contains those bars.
+- In the export dialog choose **UNIX timestamp** for the time format, so the time zone can't
+  be misread.
 - Save it under `data/` (git-ignored), e.g. `data/tv-2026-10-19.csv`. It is market data: never
   commit or share it.
+- If the tool says it found no script plot columns, send the CSV's first line (the column names
+  only, no prices) so the parser can be adjusted to TradingView's naming.
 
 ### 3. App export
 
-After 15:30 IST, with the app running, open
+The endpoint came with the update that added this page. Pull and restart only after the close:
+a restart during market hours makes the paper trader miss calls. After 15:30 IST, with the app
+running, open
 `http://127.0.0.1:8787/api/paper/export?day=2026-10-19` and save it as
 `data/paper-2026-10-19.json`.
 
 It holds the day's paper trades and events, the dashboard settings, and the 1-minute candles the
-paper trader actually ran the script on (Kite's history plus its live candles, after Kite's
-corrections).
+trader holds at export time. Bars it has reconciled with Kite are Kite's final versions; after a
+restart, it holds Kite's history only. The comparison in section 5 below is therefore "the live
+decisions against a replay on the final candles", which is what catches calls Kite's later
+corrections took away.
 
 ### 4. Run
 
