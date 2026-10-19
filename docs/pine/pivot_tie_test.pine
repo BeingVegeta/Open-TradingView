@@ -1,0 +1,59 @@
+//@version=6
+// Which of two equal highs (lows) does ta.pivothigh (ta.pivotlow) report?
+// Add to any chart (symbol and timeframe don't matter: the series is synthetic)
+// and read the table in the top-right corner. See docs/B2B_PARITY.md.
+indicator("Pivot tie test (N-B2B parity)", overlay = false)
+
+// A 12-bar cycle with two equal highs (positions 5 and 6, value 9) and two equal
+// lows (position 11 and the next cycle's 0, value 0). Every other bar in the
+// 5-bar windows is strictly lower (higher), so only the tie rule decides.
+var array<float> pat = array.from(0.0, 1.0, 2.0, 3.0, 4.0, 9.0, 9.0, 4.0, 3.0, 2.0, 1.0, 0.0)
+float src = array.get(pat, bar_index % 12)
+
+// The same strengths as the script (swLen = 5).
+float ph = ta.pivothigh(src, 5, 5)
+float pl = ta.pivotlow(src, 5, 5)
+
+var int phOlder = 0
+var int phNewer = 0
+var int phOther = 0
+var int plOlder = 0
+var int plNewer = 0
+var int plOther = 0
+
+if not na(ph)
+    int k = (bar_index - 5) % 12
+    if k == 5
+        phOlder += 1
+    else if k == 6
+        phNewer += 1
+    else
+        phOther += 1
+
+if not na(pl)
+    int k = (bar_index - 5) % 12
+    if k == 11
+        plOlder += 1
+    else if k == 0
+        plNewer += 1
+    else
+        plOther += 1
+
+plot(src, "series", color.gray)
+plotshape(not na(ph), "pivot high", shape.triangledown, location.top, color.red, offset = -5)
+plotshape(not na(pl), "pivot low", shape.triangleup, location.bottom, color.teal, offset = -5)
+
+var table t = table.new(position.top_right, 4, 3, bgcolor = color.new(color.black, 0), border_width = 1)
+if barstate.islast
+    table.cell(t, 0, 0, "", text_color = color.white)
+    table.cell(t, 1, 0, "older bar", text_color = color.white)
+    table.cell(t, 2, 0, "newer bar", text_color = color.white)
+    table.cell(t, 3, 0, "other", text_color = color.white)
+    table.cell(t, 0, 1, "pivothigh", text_color = color.white)
+    table.cell(t, 1, 1, str.tostring(phOlder), text_color = color.white)
+    table.cell(t, 2, 1, str.tostring(phNewer), text_color = color.white)
+    table.cell(t, 3, 1, str.tostring(phOther), text_color = color.white)
+    table.cell(t, 0, 2, "pivotlow", text_color = color.white)
+    table.cell(t, 1, 2, str.tostring(plOlder), text_color = color.white)
+    table.cell(t, 2, 2, str.tostring(plNewer), text_color = color.white)
+    table.cell(t, 3, 2, str.tostring(plOther), text_color = color.white)

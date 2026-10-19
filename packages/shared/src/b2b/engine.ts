@@ -80,6 +80,24 @@ export interface B2BAlert {
   lines: string[];
 }
 
+/** A swing point found by the script's pivot test (`ta.pivothigh/pivotlow(swLen, swLen)`). */
+export interface B2BPivot {
+  kind: 'high' | 'low';
+  /** Open time of the pivot bar, and of the bar that confirmed it (swLen bars later). */
+  time: number;
+  confirmedAt: number;
+  price: number;
+}
+
+/**
+ * Which of two equal highs (or lows) inside the pivot window becomes the pivot.
+ * Pine's reference doesn't say. 'older': the left side must be strictly lower
+ * and the right side may tie (this port's original reading). 'newer': the left
+ * side may tie and the right side must be strictly lower (PyneCore's
+ * implementation of ta.pivothigh). See docs/B2B_PARITY.md.
+ */
+export type PivotTie = 'older' | 'newer';
+
 export interface B2BState {
   pos: 0 | 1 | -1;
   ent: number;
@@ -131,6 +149,8 @@ export interface B2BResult {
   /** Bars processed, and whether the last one was only previewed. */
   bars: number;
   previewed: boolean;
+  /** Every swing point found, oldest first (diagnostics). */
+  pivots: B2BPivot[];
 }
 
 interface ZoneRec {
@@ -216,6 +236,8 @@ export interface B2BOptions {
   formingIndex?: number;
   /** Bar length in seconds (60 on the 1-minute chart). */
   barSeconds?: number;
+  /** Tie rule for swing highs and lows (default 'older'). */
+  pivotTie?: PivotTie;
 }
 
 /** Runs the script over candles (oldest first). */
@@ -223,6 +245,8 @@ export function runB2B(candles: readonly Candle[], opts: B2BOptions): B2BResult 
   const S = opts.settings;
   const barS = opts.barSeconds ?? 60;
   const forming = opts.formingIndex ?? -1;
+  const newerTie = opts.pivotTie === 'newer';
+  const pivots: B2BPivot[] = [];
   const m = S.measure === 'points' ? 1 : S.deltaF;
   const mName = S.measure === 'points' ? 'index pts' : 'premium pts (est.)';
 
@@ -365,17 +389,26 @@ export function runB2B(candles: readonly Candle[], opts: B2BOptions): B2BResult 
       for (let k = 1; k <= L; k++) {
         const left = candles[cIdx - k]!;
         const right = candles[cIdx + k]!;
-        // Left side strictly lower (higher for lows), right side not higher.
-        if (left.high >= ch || right.high > ch) isPh = false;
-        if (left.low <= cl || right.low < cl) isPl = false;
+        if (newerTie) {
+          // Left side may tie, right side strictly lower (higher for lows).
+          if (left.high > ch || right.high >= ch) isPh = false;
+          if (left.low < cl || right.low <= cl) isPl = false;
+        } else {
+          // Left side strictly lower (higher for lows), right side may tie.
+          if (left.high >= ch || right.high > ch) isPh = false;
+          if (left.low <= cl || right.low < cl) isPl = false;
+        }
       }
+      const pt = candles[cIdx]!.time;
       if (isPh) {
         sHigh = ch;
         armUp = true;
+        pivots.push({ kind: 'high', time: pt, confirmedAt: c.time, price: ch });
       }
       if (isPl) {
         sLow = cl;
         armDn = true;
+        pivots.push({ kind: 'low', time: pt, confirmedAt: c.time, price: cl });
       }
     }
 
@@ -841,6 +874,7 @@ export function runB2B(candles: readonly Candle[], opts: B2BOptions): B2BResult 
     invBuf: lastInvBuf,
     bars: candles.length,
     previewed,
+    pivots,
   };
 }
 

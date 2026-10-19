@@ -275,6 +275,31 @@ describe('N-B2B v1.8 engine', () => {
   });
 });
 
+describe('pivot ties', () => {
+  // Two equal highs at bars 5 and 6 (and, mirrored, two equal lows), with five
+  // strictly lower (higher) bars on the outside of the pair: only the tie
+  // decides which of the two is the swing point.
+  const pat = [1, 2, 3, 4, 5, 9, 9, 5, 4, 3, 2, 1];
+  const highs = bars(pat.map((p) => [25000 + p, 25000 + p, 24999 + p, 25000 + p]));
+  const lows = bars(pat.map((p) => [25000 - p, 25001 - p, 25000 - p, 25000 - p]));
+  const pivots = (cs: Candle[], tie?: 'older' | 'newer') =>
+    runB2B(cs, { settings: B2B_DEFAULTS, pivotTie: tie }).pivots.map((p) => [
+      p.kind,
+      (p.time - T0) / 60,
+      (p.confirmedAt - T0) / 60,
+    ]);
+
+  it("takes the older of equal highs and lows by default (the port's original reading)", () => {
+    expect(pivots(highs)).toEqual([['high', 5, 10]]);
+    expect(pivots(lows)).toEqual([['low', 5, 10]]);
+  });
+
+  it("takes the newer one with pivotTie 'newer' (PyneCore's ta.pivothigh/pivotlow)", () => {
+    expect(pivots(highs, 'newer')).toEqual([['high', 6, 11]]);
+    expect(pivots(lows, 'newer')).toEqual([['low', 6, 11]]);
+  });
+});
+
 describe('closing prints', () => {
   /** One day's candles from `hh:mm` with the given closes. */
   const day = (d: number, hh: number, mm: number, closes: number[]) =>
