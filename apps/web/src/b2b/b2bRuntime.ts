@@ -1,7 +1,7 @@
 import {
-  dropClosingPrints,
   formingIndexAt,
   runB2B,
+  tradingViewIndexSession,
   type B2BAlert,
   type B2BLive,
   type B2BResult,
@@ -89,8 +89,8 @@ export function useB2BRuntime(): void {
       const nowS = marketNowS();
       const forming = formingIndexAt(candles, nowS);
       const all = forming >= 0 ? candles.slice(0, -1) : candles;
-      // Index candles end each day on the official close; see dropClosingPrints.
-      const closed = isIndex ? dropClosingPrints(all, nowS) : all;
+      // TradingView's index day ends at 15:14; see tradingViewIndexSession.
+      const closed = isIndex ? tradingViewIndexSession(all) : all;
       const last = candles.at(-1)!;
       const live = { time: last.time, close: last.close };
       const sig = signature(closed, settings);

@@ -891,48 +891,22 @@ export function formingIndexAt(candles: readonly Candle[], nowS: number, barS = 
   return last && last.time + barS > nowS ? candles.length - 1 : -1;
 }
 
-/** From this IST minute of the day, a run of candles at the day's final close is suspect. */
-const CLOSING_PRINT_FROM = 15 * 60 + 20;
-/** Index sessions end at 15:30 IST. */
-const SESSION_END_MS = (15 * 60 + 30) * 60_000;
+/** The last 1-minute bar of the day in TradingView's NSE index data (15:14 IST). */
+const INDEX_LAST_MINUTE = 15 * 60 + 14;
 
 /**
- * Kite's 1-minute index candles end each day on the official closing value,
- * which comes from the closing auction, not from trading: on 16-Oct-2026 NIFTY
- * traded near 23,120 until 15:27, then its 15:28 candle jumped to the official
- * close of 23,146.15 and 15:29 stayed there. TradingView's candles don't have
- * the jump, and it breaks zones the script would carry into the next day.
- *
- * For every finished day (a later day follows, or it is past 15:30 IST on that
- * day at `nowS`), this drops the trailing candles from 15:20 on whose close
- * equals the day's last close. On a day without the jump that is just the 15:29
- * candle (after the 15:15 square-off). A day still in session is left alone.
+ * TradingView's NIFTY 1-minute candles end each day at 15:14 IST (seen on 13, 15
+ * and 16 Oct 2026, docs/B2B_PARITY.md); Kite's run to 15:29. Kite's extra bars
+ * are frozen prices (15-Oct: 22939.95 for 13 bars) or end on the official
+ * closing value from the closing auction (16-Oct: a jump to 23,146.15), and
+ * they create swing points and break zones the script on TradingView never
+ * sees. So for indices the script runs on bars up to 15:14 only. Nothing trades
+ * after the 15:15 square-off anyway.
  */
-export function dropClosingPrints<T extends Candle>(
-  candles: readonly T[],
-  nowS = -Infinity,
-): readonly T[] {
-  let out: T[] | null = null;
-  let end = candles.length; // exclusive end of the day being checked
-  for (let i = candles.length - 1; i >= 0; i--) {
-    const day = istStartOfDay(candles[i]!.time * 1000);
-    if (i > 0 && istStartOfDay(candles[i - 1]!.time * 1000) === day) continue;
-    // candles[i..end) is one IST day; only trim it once the day is over.
-    if (end < candles.length || nowS * 1000 >= day + SESSION_END_MS) {
-      const last = candles[end - 1]!.close;
-      let cut = end;
-      while (cut > i) {
-        const c = candles[cut - 1]!;
-        const p = toIstParts(c.time * 1000);
-        if (c.close !== last || p.hour * 60 + p.minute < CLOSING_PRINT_FROM) break;
-        cut--;
-      }
-      if (cut < end) {
-        out ??= candles.slice();
-        out.splice(cut, end - cut);
-      }
-    }
-    end = i;
-  }
-  return out ?? candles;
+export function tradingViewIndexSession<T extends Candle>(candles: readonly T[]): readonly T[] {
+  const keep = candles.filter((c) => {
+    const p = toIstParts(c.time * 1000);
+    return p.hour * 60 + p.minute <= INDEX_LAST_MINUTE;
+  });
+  return keep.length === candles.length ? candles : keep;
 }

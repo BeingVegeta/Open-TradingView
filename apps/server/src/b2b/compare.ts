@@ -1,9 +1,8 @@
 import {
   b2bLogView,
-  dropClosingPrints,
-  istToEpoch,
   runB2B,
   toIstParts,
+  tradingViewIndexSession,
   type B2BLogRow,
   type B2BResult,
   type B2BSettings,
@@ -214,7 +213,7 @@ export interface RunOptions {
   day: string;
   /** Keep only the last N bars up to the end of the day (null: all of them). */
   warmup: number | null;
-  /** Drop index closing-value prints, as the app does with Kite candles. */
+  /** Drop index bars after 15:14, as the app does with Kite candles. */
   trim: boolean;
   settings: B2BSettings;
   pivotTie: PivotTie;
@@ -223,25 +222,15 @@ export interface RunOptions {
 }
 
 export interface ScriptRun {
-  /** The bars the engine ran on, and the ones the closing-print rule removed. */
+  /** The bars the engine ran on, and the index bars after 15:14 that were left out. */
   used: Candle[];
   dropped: Candle[];
   res: B2BResult;
 }
 
-const endOfDay = (day: string) => {
-  const [y, m, d] = day.split('-').map(Number) as [number, number, number];
-  return istToEpoch(y, m, d, 23, 59) / 1000;
-};
-
-/** Candles up to the end of a day without the index closing prints the app ignores. */
-export function withoutClosingPrints(candles: readonly Candle[], day: string): Candle[] {
-  return [
-    ...dropClosingPrints(
-      candles.filter((c) => istDay(c.time) <= day),
-      endOfDay(day),
-    ),
-  ];
+/** Candles up to the end of a day, without the bars after 15:14 the app ignores for indices. */
+export function inAppSession(candles: readonly Candle[], day: string): Candle[] {
+  return [...tradingViewIndexSession(candles.filter((c) => istDay(c.time) <= day))];
 }
 
 export function runScript(candles: readonly Candle[], o: RunOptions): ScriptRun {
@@ -249,7 +238,7 @@ export function runScript(candles: readonly Candle[], o: RunOptions): ScriptRun 
     (c) => istDay(c.time) <= o.day && (o.from === undefined || c.time >= o.from),
   );
   const sliced = o.warmup === null ? upTo : upTo.slice(-o.warmup);
-  const used = o.trim ? [...dropClosingPrints(sliced, endOfDay(o.day))] : sliced;
+  const used = o.trim ? [...tradingViewIndexSession(sliced)] : sliced;
   const kept = new Set(used.map((c) => c.time));
   return {
     used,
@@ -623,9 +612,9 @@ indicator("Kite vs TradingView (N-B2B parity)", overlay = true)
 
 DAY = input.string(${q(last)}, "Day", options = [${days.map(q).join(', ')}])
 PAGE = input.int(1, "Page", minval = 1)
+ROWS = input.int(30, "Rows per column (fewer if the table is cut off)", minval = 5, maxval = 40)
 const string TZ = "Asia/Kolkata"
 const int NONE = -999999
-const int PER_PAGE = 120
 
 var array<string> DAYS = array.from(${days.map(q).join(', ')})
 var array<int> BASES = array.from(${packed.map((p) => p.base).join(', ')})
@@ -664,6 +653,8 @@ if barstate.isfirst
 
 sig(int d) =>
     d == 0 ? "." : (d > 0 ? "+" : "") + str.tostring(d)
+num(string s) =>
+    nz(str.tonumber(str.replace_all(s, "+", "")))
 hhmm(int m) =>
     str.format("{0,number,00}:{1,number,00}", math.floor((m + 555) / 60), (m + 555) % 60)
 
@@ -691,36 +682,49 @@ if str.format_time(time, "yyyy-MM-dd", TZ) == DAY
                 array.push(eL, sig(dL))
                 array.push(eC, sig(dC))
 
-var table tb = table.new(position.top_right, 15, 42, bgcolor = color.new(color.black, 0), border_width = 1)
+var table info = table.new(position.bottom_left, 1, 3, bgcolor = color.new(color.black, 0), border_width = 1)
+var table tb = table.new(position.top_right, 20, ROWS + 3, bgcolor = color.new(color.black, 0), border_width = 1)
 if barstate.islast
     string kOnly = ""
     int kn = 0
     for m = 0 to 399
         if array.get(kC, m) != NONE and not array.get(seen, m)
             kn += 1
-            if kn <= 15
+            if kn <= 20
                 kOnly += " " + hhmm(m)
     int n = array.size(eT)
-    int pages = math.max(1, math.ceil(n / PER_PAGE))
-    string head = DAY + " | TradingView bars " + str.tostring(tvBars) + " | Kite bars " + str.tostring(kBars) + " | differing " + str.tostring(n) + " | page " + str.tostring(PAGE) + " of " + str.tostring(pages) + " | Kite only " + str.tostring(kn) + ":" + kOnly + (kn > 15 ? " ..." : "")
-    table.cell(tb, 0, 0, head, text_color = color.white, text_size = size.small)
-    table.merge_cells(tb, 0, 0, 14, 0)
-    for g = 0 to 2
-        table.cell(tb, g * 5, 1, "IST", text_color = color.white, text_size = size.small)
-        table.cell(tb, g * 5 + 1, 1, "O", text_color = color.white, text_size = size.small)
-        table.cell(tb, g * 5 + 2, 1, "H", text_color = color.white, text_size = size.small)
-        table.cell(tb, g * 5 + 3, 1, "L", text_color = color.white, text_size = size.small)
-        table.cell(tb, g * 5 + 4, 1, "C", text_color = color.white, text_size = size.small)
-    int start = (PAGE - 1) * PER_PAGE
-    for j = 0 to PER_PAGE - 1
+    int per = ROWS * 4
+    int pages = math.max(1, math.ceil(n / per))
+    table.cell(info, 0, 0, DAY + " | TradingView bars " + str.tostring(tvBars) + " | Kite bars " + str.tostring(kBars) + " | differing " + str.tostring(n) + " | page " + str.tostring(PAGE) + " of " + str.tostring(pages), text_color = color.white, text_size = size.small)
+    table.cell(info, 0, 1, "Kite only " + str.tostring(kn) + ":" + kOnly + (kn > 20 ? " ..." : ""), text_color = color.white, text_size = size.small)
+    for g = 0 to 3
+        table.cell(tb, g * 5, 0, "IST", text_color = color.white, text_size = size.small)
+        table.cell(tb, g * 5 + 1, 0, "O", text_color = color.white, text_size = size.small)
+        table.cell(tb, g * 5 + 2, 0, "H", text_color = color.white, text_size = size.small)
+        table.cell(tb, g * 5 + 3, 0, "L", text_color = color.white, text_size = size.small)
+        table.cell(tb, g * 5 + 4, 0, "C", text_color = color.white, text_size = size.small)
+    int start = (PAGE - 1) * per
+    int rowsOnPage = 0
+    float sO = 0
+    float sH = 0
+    float sL = 0
+    float sC = 0
+    for j = 0 to per - 1
         int k = start + j
         if k < n
-            int col = math.floor(j / 40) * 5
-            int row = j % 40 + 2
+            int col = math.floor(j / ROWS) * 5
+            int row = j % ROWS + 1
+            rowsOnPage += 1
             table.cell(tb, col, row, array.get(eT, k), text_color = color.white, text_size = size.small)
             table.cell(tb, col + 1, row, array.get(eO, k), text_color = color.white, text_size = size.small)
             table.cell(tb, col + 2, row, array.get(eH, k), text_color = color.white, text_size = size.small)
             table.cell(tb, col + 3, row, array.get(eL, k), text_color = color.white, text_size = size.small)
             table.cell(tb, col + 4, row, array.get(eC, k), text_color = color.white, text_size = size.small)
+            if not str.contains(array.get(eT, k), "*")
+                sO += num(array.get(eO, k))
+                sH += num(array.get(eH, k))
+                sL += num(array.get(eL, k))
+                sC += num(array.get(eC, k))
+    table.cell(info, 0, 2, "page check: rows " + str.tostring(rowsOnPage) + " | sum O " + str.tostring(sO) + " H " + str.tostring(sH) + " L " + str.tostring(sL) + " C " + str.tostring(sC), text_color = color.yellow, text_size = size.small)
 `;
 }

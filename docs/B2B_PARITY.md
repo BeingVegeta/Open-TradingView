@@ -49,12 +49,10 @@ On 16-Oct, Kite's 15:28 candle jumps from about 23,119 to NIFTY's official close
 (from the closing auction), and 15:29 stays there. On 15-Oct the jump came at about 15:26.
 TradingView's candles don't have it.
 
-The app now drops these trailing candles from a finished day before running the script
-(`dropClosingPrints`; see DECISIONS.md). One known side effect: on a day with the jump, a swing
-point at 15:23–15:24 can't be confirmed, because the five bars after it are cut.
-
-**Open question:** on 15-Oct, Kite's NIFTY is flat from about 15:14 to 15:25. TradingView's 15-Oct
-chart hasn't been checked for the same stretch.
+**Settled 21-Oct:** TradingView's NIFTY has no 1-minute bars from 15:15 onward at all (13, 15 and
+16 Oct); its day ends at 15:14. Kite's 15:15–15:29 bars, frozen on 15-Oct and ending on the
+official close on 16-Oct, are extra. The app now runs the script on index bars up to 15:14 only
+(`tradingViewIndexSession`, which replaced the first closing-print rule; see DECISIONS.md).
 
 ### Swing-point ties: the port had it backwards (fixed 21-Oct)
 
@@ -147,11 +145,11 @@ them all.
 The output has these sections:
 
 1. **Engine on TradingView candles.** Runs the engine on TradingView's own bars, all of them,
-   with no closing-print trimming, under both tie rules. It compares the engine's plots with the
+   with no trimming, under both tie rules. It compares the engine's plots with the
    script's plots on every bar, prints the first diverging bar and the engine's state there
    (position, zones, recent swing points, the last three bars), the swing points the two rules
    disagree on, and the day's call log and alerts.
-2. **Engine on Kite candles.** Runs the engine as the app does, and lists the closing-print bars
+2. **Engine on Kite candles.** Runs the engine as the app does, and lists the bars after 15:14
    it dropped.
 3. **Candles: Kite − TradingView.** The first bar that differs by more than the tolerance (and the
    first among the bars the app uses), the day's largest high, low and close differences, and
@@ -199,7 +197,7 @@ same candles (10:30, 10:33 entry). The swing-point tie rule changes nothing on K
 
 ### 16-Oct again: the current engine on Kite's candles vs TradingView's log
 
-Run on 21-Oct with the current engine (Pine's tie rule, closing prints dropped) on Kite's
+Run on 21-Oct with the current engine (Pine's tie rule, closing prints dropped; before the 15:14 rule) on Kite's
 candles from the second machine's export, against TradingView's 18-row CALL LOG:
 
 - 14 of TradingView's 18 calls match in time, option and result (6 exactly; 8 with entries

@@ -131,16 +131,13 @@ user's exchange and broker notices show SEBI's closing auction session (CAS):
   A mid-day change re-runs the whole day with the new settings; an open trade the new settings
   don't have is closed with the note "call withdrawn".
 
-- **Kite ends each day's index candles on the official close** (found on live data, 14–16 Oct
-  2026). On 16-Oct NIFTY traded near 23,120 until 15:27; Kite's 15:28 candle then jumps to the
-  official close, 23,146.15, which comes from the closing auction, not from trading, and 15:29
-  stays there. On 15-Oct the jump came about 15:26. TradingView's candles don't have it. The
-  jump broke every bear zone the script carried into the next day (header "live B/S 8/0" against
-  TradingView's "7/5"). For indices, the script (dashboard and paper trading) now ignores a
-  finished day's trailing candles from 15:20 on that sit on the day's last close; the chart still
-  shows Kite's candles as they are. On a day without the jump this drops only the 15:29 candle,
-  after the 15:15 square-off. A day is trimmed once it is over (after 15:30, or when the next one
-  starts), never while it is in session.
+- **TradingView's NIFTY day ends at 15:14; Kite's runs to 15:29** (found by reading TradingView's
+  candles with a Pine table, 13, 15 and 16 Oct 2026). Kite's 15:15–15:29 bars are frozen prices
+  (15-Oct: 22939.95 for 13 bars) or end on the official closing value from the closing auction
+  (16-Oct: a jump to 23,146.15). They created swing points and broke zones the script on
+  TradingView never sees. For indices the script (dashboard and paper trading) now runs on bars up
+  to 15:14 only (`tradingViewIndexSession`, replacing the earlier closing-print rule); the chart
+  still shows Kite's candles as they are. Nothing trades after the 15:15 square-off.
 - Even so, Kite's and TradingView's NIFTY 1-minute closes differ by about 0.05–0.5 points, so the
   two call logs can differ by a minute, a strike or an extra call where a close is right at a
   zone edge or a stop. On 16-Oct, 9 of the 11 calls compared matched in time and result.

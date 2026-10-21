@@ -107,12 +107,8 @@ describe('parseCandleFile', () => {
 });
 
 describe('runScript', () => {
-  it('keeps the last N bars up to the day and trims closing prints only when asked', () => {
+  it('keeps the last N bars up to the day and drops bars after 15:14 only when asked', () => {
     const cs = market([15, 16, 19]);
-    // A closing-value jump at the end of the 15th.
-    const last15 = cs.findIndex((c) => istDay(c.time) === '2026-10-16') - 1;
-    cs[last15 - 1] = { ...cs[last15 - 1]!, close: 25500, high: 25500 };
-    cs[last15] = { ...cs[last15]!, open: 25500, high: 25500, low: 25500, close: 25500 };
     const r = runScript(cs, {
       day: '2026-10-16',
       warmup: 500,
@@ -121,11 +117,8 @@ describe('runScript', () => {
       pivotTie: 'older',
     });
     expect(r.used.every((c) => istDay(c.time) <= '2026-10-16')).toBe(true);
-    expect(r.dropped.map((c) => istDay(c.time))).toEqual([
-      '2026-10-15',
-      '2026-10-15',
-      '2026-10-16',
-    ]);
+    // 15:15-15:29 on both days in the window.
+    expect(r.dropped).toHaveLength(30);
     expect(r.used.length + r.dropped.length).toBe(500);
     expect(run(cs).dropped).toEqual([]);
   });

@@ -1,7 +1,6 @@
 import { EventEmitter } from 'node:events';
 import {
   B2B_ENGINE_REV,
-  dropClosingPrints,
   dropUnconfirmed,
   formatIstDateTime,
   getTimeframe,
@@ -11,6 +10,7 @@ import {
   runB2B,
   sanitizeB2BSettings,
   toIstParts,
+  tradingViewIndexSession,
   type B2BLogRow,
   type B2BResult,
   type B2BSettings,
@@ -325,8 +325,8 @@ export class PaperTrader extends EventEmitter<{ change: [] }> {
     const sig = `${closed.length}|${lastC.time}|${lastC.close}|${lastC.high}|${lastC.low}|${JSON.stringify(settings)}`;
     if (sig !== this.lastSig) {
       this.lastSig = sig;
-      // NIFTY's candles end each day on the official close; see dropClosingPrints.
-      const res = runB2B(dropClosingPrints(closed, nowS), { settings });
+      // TradingView's NIFTY day ends at 15:14; see tradingViewIndexSession.
+      const res = runB2B(tradingViewIndexSession(closed), { settings });
       this.lastBar = res.lastTime;
       if (this.seenUntil === null) {
         // Started (or restarted): don't trade calls from before we were watching.

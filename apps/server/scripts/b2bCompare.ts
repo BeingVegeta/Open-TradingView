@@ -32,7 +32,7 @@ import {
   runScript,
   stateAt,
   textTable,
-  withoutClosingPrints,
+  inAppSession,
   type CandleFile,
   type ScriptRun,
 } from '../src/b2b/compare';
@@ -176,7 +176,7 @@ function printLog(run: ScriptRun, title: string): void {
 function describeRun(run: ScriptRun): string {
   const u = run.used;
   return `${u.length} bars from ${u.length ? at(u[0]!.time) : '-'}${
-    run.dropped.length ? `, ${run.dropped.length} closing-print bars dropped` : ''
+    run.dropped.length ? `, ${run.dropped.length} bars after 15:14 dropped` : ''
   }`;
 }
 
@@ -265,10 +265,10 @@ if (tv && kite && tvHasDay && kiteHasDay) {
         ? `First bar differing by more than ${tol}: ${at(f.time)} (dO ${f.dOpen} dH ${f.dHigh} dL ${f.dLow} dC ${f.dClose})`
         : `No bar differs by more than ${tol}.`,
     );
-    const used = diffCandles(tv.candles, withoutClosingPrints(kite.candles, day), day, tol).first;
+    const used = diffCandles(tv.candles, inAppSession(kite.candles, day), day, tol).first;
     if (used && used.time !== f?.time)
       out(
-        `First one among the bars the app uses (closing prints left out): ${at(used.time)} ` +
+        `First one among the bars the app uses (bars after 15:14 left out): ${at(used.time)} ` +
           `(dO ${used.dOpen} dH ${used.dHigh} dL ${used.dLow} dC ${used.dClose})`,
       );
     out(`${day}: ${d.day.length} of ${d.dayBars} bars differ by more than ${tol}`);
@@ -294,7 +294,7 @@ if (tv && kite && tvHasDay && kiteHasDay) {
             String(x.dHigh),
             String(x.dLow),
             String(x.dClose),
-            dropped.has(x.time) ? 'closing print (ignored by the app)' : '',
+            dropped.has(x.time) ? 'after 15:14 (ignored by the app)' : '',
           ]),
         ),
       );
