@@ -197,6 +197,30 @@ Fixed since (see DECISIONS.md): the trader refetches missing minutes and records
 same candles (10:30, 10:33 entry). The swing-point tie rule changes nothing on Kite's 19-Oct or
 21-Oct candles.
 
+### 16-Oct again: the current engine on Kite's candles vs TradingView's log
+
+Run on 21-Oct with the current engine (Pine's tie rule, closing prints dropped) on Kite's
+candles from the second machine's export, against TradingView's 18-row CALL LOG:
+
+- 14 of TradingView's 18 calls match in time, option and result (6 exactly; 8 with entries
+  0.05–0.85 apart and points a few tenths apart).
+- **12:03:** Kite's best move was +9.75, TradingView's +10.1, so only TradingView moved the stops.
+  **14:16:** entry 23100.1 vs 23099.95 gives a different strike. **12:37** is 12:38 on Kite.
+  All three are price differences.
+- **09:31 (extra, ours):** on 15-Oct Kite's NIFTY is frozen at 22939.95 from 15:15 to 15:27
+  (open = high = low = close for 13 bars). Pine's tie rule makes the newest of those equal lows,
+  15:27, a swing low, and the 16-Oct 09:31 close breaks it. TradingView made no 09:31 call, so its
+  15-Oct candles are probably not frozen. The old tie rule ignored the flat run, which is why it
+  happened to match here.
+- **13:34 and 13:57 (extra, ours) and 13:45 vs 13:49:** not tie-related; both rules agree. 13:34
+  is a breaker: the 12:52 bear block (23124.65–23132.6) is broken by the 13:33 and 13:34 closes,
+  which clear its top plus the ATR buffer by 1.06 and 2.83 points. Whether TradingView's 12:52
+  candle and 13:33–13:34 closes do the same decides it.
+
+No rule difference other than the tie rule has been found. To settle the last two items without a
+paid export, read these NIFTY 50 1-minute candles off TradingView: 15-Oct 15:10–15:29, and 16-Oct
+12:52 and 13:32–13:34.
+
 ## Results
 
 _Not yet run._ Fill in from the tool's output:
