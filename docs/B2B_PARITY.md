@@ -4,10 +4,10 @@ The app runs a TypeScript port of Varun's "NIFTY 2-Lot Block-to-Block v1.8" Pine
 (`packages/shared/src/b2b/engine.ts`). On 16-Oct-2026 its call log differed from TradingView's.
 This page records what is known, the tools that settle the rest, and how to read their output.
 
-**Status (21-Oct-2026): one translation bug found and fixed; the full check is pending.** The
-Pine tie test showed the port picked the wrong bar when two swing highs or lows tie (below). The
-engine now follows Pine. Whether everything else matches bar by bar still needs a TradingView
-export and an app export (steps 2–3 below).
+**Status (22-Oct-2026): verified.** On TradingView's own candles the engine reproduces
+TradingView's 16-Oct call log trade for trade (Results, below). Two things had to change on the
+way: Pine's tie rule for equal swing points, and ignoring index bars after 15:14, which
+TradingView doesn't have. What remains is the data: Kite's candles differ from TradingView's.
 
 ## What is established
 
@@ -234,11 +234,28 @@ TradingView's open usually equals Kite's previous close (10 of 16), and closes d
 
 ## Results
 
-_Not yet run._ Fill in from the tool's output:
+**22-Oct-2026: the port reproduces TradingView exactly.** TradingView's NIFTY 1-minute candles for
+13–16 Oct were read off TradingView with `pnpm b2b:pine-diff` tables (9 pages; 8 matched their
+checksums exactly, one had a single close cell 0.10 off on 14-Oct, which changes nothing). Run on
+those candles (Kite's before 13-Oct, bars up to 15:14), the engine's 16-Oct call log is
+**identical to TradingView's CALL LOG: 18 of 18 trades with the same minute, strike, entry,
+result and points, 18 trades and +98.72 pts on the day**. The same holds under both tie rules on
+this data. So every difference between the app and TradingView comes from the candles, not the
+rules.
 
-| Day | Bars | Pivot tie | Bars differing (older / newer) | First diverging bar | Engine on TV candles = TV log? |
-| --- | ---- | --------- | ------------------------------ | ------------------- | ------------------------------ |
-|     |      |           |                                |                     |                                |
+How Kite's and TradingView's candles differ (13–16 Oct, 1,440 TradingView bars):
+
+| Day    | Bars that differ | Mostly in                               |
+| ------ | ---------------- | --------------------------------------- |
+| 13-Oct | 49 of 360        | opens                                   |
+| 14-Oct | 344 of 360       | opens and closes, up to about ±3 points |
+| 15-Oct | 159 of 360       | opens and closes                        |
+| 16-Oct | 348 of 360       | opens (up to about 3 points) and closes |
+
+Highs and lows almost always agree. TradingView's open is often Kite's previous close, so the two
+feeds split the minute boundary differently. Opens and closes decide candle colour, and the
+script picks zone candles by colour, which is how small differences change calls. TradingView also
+has no bars from 15:15 (see above).
 
 Pine tie test (21-Oct-2026): `pivothigh` newer bar 480, older bar 0; `pivotlow` newer bar 479,
 older bar 0. Pine keeps the newer of equal extremes; the engine's default was switched to match.
