@@ -1,4 +1,4 @@
-import { istToEpoch, type PaperTrade } from '@otv/shared';
+import { istToEpoch, type Candle, type PaperTrade } from '@otv/shared';
 import { afterEach, describe, expect, it } from 'vitest';
 import { MarketClock } from '../src/kite/marketClock';
 import { MockKiteGateway } from '../src/kite/mockGateway';
@@ -21,29 +21,44 @@ const until = async (cond: () => boolean | Promise<boolean>, ms: number) => {
   }
 };
 
+const START = istToEpoch(2026, 10, 16, 10, 0, 30);
+
+/** A logged-in app on a mock market at 60x, with the paper trader running. */
+async function startPaper(extra: Parameters<typeof makeApp>[0] = {}) {
+  const clock = new MarketClock(START, 60);
+  const gateway = new MockKiteGateway({ clock });
+  await gateway.start();
+  const m = await makeApp({
+    gateway,
+    marketClock: clock,
+    paper: true,
+    paperPollMs: 200,
+    reconcileDelayMs: 3000,
+    // At 60x a second of real delay is a market minute: don't treat calls as late.
+    paperMaxEntryLagMs: 600_000,
+    paperRefillEveryMs: 0,
+    ...extra,
+  });
+  cleanups.push(
+    () => gateway.close(),
+    () => m.server.close(),
+  );
+  const state = new URL(m.auth.beginLogin(), 'http://x').searchParams.get('state')!;
+  await m.auth.completeLogin('mock-1', state);
+  await m.sync.sync();
+  await m.server.ready();
+  m.paper.reconsider();
+  await until(() => m.paper.status().state === 'running', 20_000);
+  return m;
+}
+
+const held = (m: Awaited<ReturnType<typeof startPaper>>) =>
+  m.paper as unknown as { candles: Candle[] };
+
 describe('paper trading (mock market at 60x)', { timeout: 60_000 }, () => {
   it('mirrors calls as option fills, stores the trade and its events, and reports metrics', async () => {
-    const start = istToEpoch(2026, 10, 16, 10, 0, 30);
-    const clock = new MarketClock(start, 60);
-    const gateway = new MockKiteGateway({ clock });
-    await gateway.start();
-    const m = await makeApp({
-      gateway,
-      marketClock: clock,
-      paper: true,
-      paperPollMs: 200,
-      reconcileDelayMs: 3000,
-    });
-    cleanups.push(
-      () => gateway.close(),
-      () => m.server.close(),
-    );
-    const state = new URL(m.auth.beginLogin(), 'http://x').searchParams.get('state')!;
-    await m.auth.completeLogin('mock-1', state);
-    await m.sync.sync();
-    await m.server.ready();
-    m.paper.reconsider();
-    await until(() => m.paper.status().state === 'running', 20_000);
+    const start = START;
+    const m = await startPaper();
 
     const trades = async () =>
       (await m.server.inject({ url: '/api/paper/trades', headers: HOST })).json() as PaperTrade[];
@@ -118,6 +133,14 @@ describe('paper trading (mock market at 60x)', { timeout: 60_000 }, () => {
         .statusCode,
     ).toBe(400);
 
+    // A hole in today's candles (the machine slept, the feed resent only its last
+    // bars) is refilled from Kite before the script runs again.
+    const h0 = istToEpoch(2026, 10, 16, 9, 40) / 1000;
+    held(m).candles = held(m).candles.filter((c) => c.time < h0 || c.time >= h0 + 600);
+    await until(() => held(m).candles.some((c) => c.time === h0 + 300), 10_000);
+    const today = held(m).candles.filter((c) => c.time >= istToEpoch(2026, 10, 16, 9, 15) / 1000);
+    expect(today.every((c, i) => i === 0 || c.time - today[i - 1]!.time === 60)).toBe(true);
+
     // Turning it off stops it and releases its subscriptions.
     const off = await m.server.inject({
       method: 'PUT',
@@ -126,6 +149,25 @@ describe('paper trading (mock market at 60x)', { timeout: 60_000 }, () => {
       payload: { enabled: false },
     });
     expect(off.json()).toMatchObject({ enabled: false, state: 'off' });
+  });
+});
+
+describe('paper trading after a stall', { timeout: 60_000 }, () => {
+  it('records a call that arrives late as MISSED instead of entering it', async () => {
+    // Every call counts as late: as after the machine wakes from sleep.
+    const m = await startPaper({ paperMaxEntryLagMs: 0 });
+    const events = async () =>
+      (
+        await m.server.inject({ url: '/api/paper/events?day=2026-10-16', headers: HOST })
+      ).json() as { kind: string; text: string; tradeId: number | null }[];
+    await until(async () => (await events()).some((e) => e.kind === 'MISSED'), 45_000);
+    const missed = (await events()).find((e) => e.kind === 'MISSED')!;
+    expect(missed.text).toMatch(
+      /^MISSED\|\d\d:\d\d\|NIFTY \d+ (CE|PE)\|signal candle closed \d+ s ago/,
+    );
+    expect(missed.tradeId).toBeNull();
+    const trades = (await m.server.inject({ url: '/api/paper/trades', headers: HOST })).json();
+    expect(trades).toEqual([]);
   });
 });
 

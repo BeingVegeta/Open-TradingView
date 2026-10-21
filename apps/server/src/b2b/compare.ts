@@ -265,7 +265,8 @@ export function logTable(
   day: string,
 ): { totals: string; titles: string[]; rows: string[][] } {
   const onDay = res.lastTime !== null && istDay(res.lastTime) === day;
-  const v = b2bLogView(onDay ? res : { ...res, log: [] }, { ...S, logRows: Infinity }, null);
+  const v = b2bLogView(res, { ...S, logRows: Infinity }, null);
+  if (!onDay) return { totals: `no candles on ${day}`, titles: v.titles, rows: [] };
   return {
     totals: v.header
       .slice(1)
@@ -312,7 +313,7 @@ export interface CandleDiff {
   onlyB: number[];
   /** First bar in the overlap whose OHLC differs by more than the tolerance. */
   first: BarDiff | null;
-  /** Bars of the day differing by more than the tolerance (b − a). */
+  /** Bars of the day differing by more than the tolerance (b - a). */
   day: BarDiff[];
   dayBars: number;
   maxHigh: BarDiff | null;
@@ -320,7 +321,7 @@ export interface CandleDiff {
   maxClose: BarDiff | null;
 }
 
-/** Compares two candle series bar by bar (differences are b − a). */
+/** Compares two candle series bar by bar (differences are b - a). */
 export function diffCandles(
   a: readonly Candle[],
   b: readonly Candle[],
@@ -414,7 +415,7 @@ export interface LogMatch {
   why: string;
 }
 
-/** "L1 +9.35 / L2 COST" → "L1 # / L2 COST": the result without its numbers. */
+/** "L1 +9.35 / L2 COST" -> "L1 # / L2 COST": the result without its numbers. */
 const resultKind = (r: string) => r.replace(/[+-]?\d+(\.\d+)?/g, '#');
 
 /**
@@ -446,7 +447,7 @@ export function matchLogs(
         a: ra,
         b: rb,
         kind: 'price',
-        why: `entry ${ra.ent} vs ${rb.ent}, pts Δ${dp.toFixed(2)}`,
+        why: `entry ${ra.ent} vs ${rb.ent}, pts d${dp.toFixed(2)}`,
       };
     return { t, a: ra, b: rb, kind: 'same', why: '' };
   });
@@ -454,9 +455,9 @@ export function matchLogs(
 
 /** A short row for side-by-side logs. */
 export function brief(r: B2BLogRow | undefined): string {
-  if (!r) return '—';
+  if (!r) return '-';
   const tot = r.tot === null ? '' : ` ${r.tot >= 0 ? '+' : ''}${Math.round(r.tot * 100) / 100}`;
-  return `${r.opt} @${r.ent ?? ''} → ${r.res}${tot}`;
+  return `${r.opt} @${r.ent ?? ''} -> ${r.res}${tot}`;
 }
 
 /** The engine's state after a bar (re-run on the bars up to it), for a divergence report. */
@@ -481,10 +482,10 @@ export function stateAt(
     `bars ${upTo.length}, last ${istDay(time)} ${hhmm(time)}`,
     `position ${s.pos === 0 ? 'flat' : s.pos === 1 ? 'long' : 'short'}${s.pos ? ` entry ${s.ent} SL1 ${s.sl1} SL2 ${s.sl2} stage ${s.stage} peak ${s.pkPts}` : ''}`,
     `pending ${s.pend} | last zone event ${s.lastBlk} ${s.lastBlkT}`,
-    `ATR buffer ${res.invBuf === null ? '–' : res.invBuf.toFixed(3)}`,
-    'bull zones: ' + (z(res.bull).join('; ') || '–'),
-    'bear zones: ' + (z(res.bear).join('; ') || '–'),
-    'recent swing points: ' + (piv.join('; ') || '–'),
+    `ATR buffer ${res.invBuf === null ? '-' : res.invBuf.toFixed(3)}`,
+    'bull zones: ' + (z(res.bull).join('; ') || '-'),
+    'bear zones: ' + (z(res.bear).join('; ') || '-'),
+    'recent swing points: ' + (piv.join('; ') || '-'),
     'last bars: ' + last.join(' | '),
   ];
 }
@@ -516,6 +517,8 @@ export function matchApp(
   log: readonly B2BLogRow[],
   trades: readonly PaperTrade[],
   day: string,
+  /** "hh:mm" of calls the live trader recorded as MISSED (they came in late). */
+  missed: ReadonlySet<string> = new Set(),
 ): AppMatch[] {
   const live = trades.filter((t) => t.day === day);
   const tOf = (t: PaperTrade) => hhmm(t.signalTime);
@@ -524,9 +527,13 @@ export function matchApp(
     const r = log.find((x) => x.t === t && x.ent !== null);
     const p = live.find((x) => tOf(x) === t);
     let flag = '';
-    if (r && !p) flag = 'NOT TAKEN LIVE (trader off, before it started, or the call came later)';
+    if (r && !p && missed.has(t))
+      flag = 'MISSED LIVE (the call came in late: machine asleep or feed down)';
+    else if (r && !p)
+      flag = 'NOT TAKEN LIVE (trader off or asleep, or the live run was in another trade)';
     else if (p && !r)
-      flag = 'LIVE ONLY (Kite corrected the candle after the call, or other settings)';
+      flag =
+        'LIVE ONLY (the live run saw other candles: a gap after a stall, or one Kite corrected later)';
     else if (r && p && p.result !== null && resultKind(p.result) !== resultKind(r.res))
       flag = `RESULT DIFFERS (live: ${p.result})`;
     if (p?.notes.length) flag = [flag, `notes: ${p.notes.join('; ')}`].filter(Boolean).join(' | ');

@@ -173,6 +173,30 @@ The verdict comes from the "Bar-by-bar check" line of section 1:
   state on that bar. That bar and state are what's needed to find the bug. Don't adjust anything
   else until it's understood.
 
+### 19-Oct: the live paper trader against a replay (second machine)
+
+Exported from a second machine running the app at `dd1c194`; 20-Oct was a market holiday. The
+replay of Kite's final candles made 17 calls (+146.08 pts); the live trader made 6 trades
+(+104.8 script pts, ₹4,601 net after costs). The event timeline shows why:
+
+- The live trader was **frozen** from about 10:12 to 10:16:46, 10:42 to 11:49 and 12:56 to 14:50
+  (events for a candle are recorded only when the trader wakes, minutes or hours after it
+  closed). This is the machine sleeping, not the app being closed: a restart reloads full history
+  and notes "closed while the app was off", and none of that happened.
+- On waking, the live feed resends only its last five bars, so the trader ran the script on candles
+  with a hole. Calls at 10:12, 10:13 and 10:17 came from that holed series (the replay doesn't have
+  them); the first two were entered about three minutes late. The 10:33 trade was held through the
+  10:42–11:44 hole and exited at 11:47 (+80.35 instead of +55.37), the 12:54 one through
+  12:56–14:45 (+64.94 instead of +6.75). Every call the replay makes while the machine slept was
+  missed.
+- The options traded expired the same day: the weekly expiry moved to Monday because Tuesday was a
+  holiday. Expiry-day premiums move sharply, which shows in the fills.
+
+Fixed since (see DECISIONS.md): the trader refetches missing minutes and records late calls as
+`MISSED`. The engine itself reproduced its own live decisions wherever the live run had the
+same candles (10:30, 10:33 entry). The swing-point tie rule changes nothing on Kite's 19-Oct or
+21-Oct candles.
+
 ## Results
 
 _Not yet run._ Fill in from the tool's output:

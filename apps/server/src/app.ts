@@ -43,6 +43,10 @@ export interface AppDeps {
   reconcileDelayMs?: number;
   /** How often the paper trader re-checks for a closed candle (tests). */
   paperPollMs?: number;
+  /** Override the paper trader's late-call limit (tests run the market clock fast). */
+  paperMaxEntryLagMs?: number;
+  /** Override how often the paper trader may refill missing minutes (ms). */
+  paperRefillEveryMs?: number;
   /** Run the paper trader (default true; most tests turn it off). */
   paper?: boolean;
   /** Lets the UI switch between live and mock data (see Runtime). */
@@ -180,6 +184,8 @@ export async function buildApp(deps: AppDeps): Promise<App> {
     clock: marketClock,
     log: server.log,
     ...(deps.paperPollMs ? { pollMs: deps.paperPollMs } : {}),
+    ...(deps.paperMaxEntryLagMs !== undefined ? { maxEntryLagMs: deps.paperMaxEntryLagMs } : {}),
+    ...(deps.paperRefillEveryMs !== undefined ? { refillEveryMs: deps.paperRefillEveryMs } : {}),
     inactive: deps.paper === false,
   });
   server.addHook('onClose', async () => paper.stop());

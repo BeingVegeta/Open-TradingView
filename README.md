@@ -116,7 +116,10 @@ his "NIFTY 2-Lot Block-to-Block v1.8" TradingView script. It is meant for NIFTY 
   for today, 7 days, 30 days or all time, and **CSV** downloads the trades.
 - Calls made while the app was off are not traded. A trade still open when the app restarts is
   carried on if the script still has it open, otherwise closed at the current price with a
-  note.
+  note. After a stall (the computer asleep, the network down) the trader refetches the missing
+  minutes, and records calls that arrive more than 90 seconds late as `MISSED` rather than
+  entering them. **Keep the computer from sleeping during market hours** (Windows: Settings →
+  System → Power → Screen and sleep → "When plugged in, put my device to sleep after: Never").
 
 ### Live data
 

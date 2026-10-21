@@ -168,4 +168,11 @@ user's exchange and broker notices show SEBI's closing auction session (CAS):
   closed at the current price with a note. A call that disappears after Kite's corrected candle
   replaces the live one is closed the same way ("call withdrawn"). Trades never carry over to the
   next day.
+- **A sleeping machine** (found on 19-Oct-2026, on a second machine) freezes the trader, and on
+  waking the live feed resends only its last five bars. The trader then ran the script on candles
+  with a 1–2 hour hole, held a trade through it, and entered calls minutes late at the prices of
+  the moment. Now it refetches today's missing minutes from Kite before each run (at most once a
+  minute), and a call whose candle closed more than 90 s earlier is recorded as `MISSED` instead
+  of entered. An exit found late is still filled, at the current price, with a note. A machine
+  that sleeps through a session still misses everything while asleep: keep it awake.
 - Metrics count closed trades only. A trade without an option price counts with the script's ₹.

@@ -5,10 +5,12 @@ import {
   dropUnconfirmed,
   formatIstDateTime,
   getTimeframe,
+  istStartOfDay,
   istToEpoch,
   paperCosts,
   runB2B,
   sanitizeB2BSettings,
+  toIstParts,
   type B2BLogRow,
   type B2BResult,
   type B2BSettings,
@@ -36,6 +38,16 @@ const WARMUP_BARS = 5000;
 /** Strikes streamed on each side of spot, so a call can be filled at once. */
 const CHAIN_STRIKES = 4;
 const FILL_WAIT_MS = 3000;
+/**
+ * A call whose candle closed longer ago than this is not entered: the trader
+ * wasn't getting candles (machine asleep, feed down) and the price has moved on.
+ */
+const MAX_ENTRY_LAG_MS = 90_000;
+/** Ask Kite for missing minutes at most this often (real time). */
+const REFILL_EVERY_MS = 60_000;
+/** NSE index session, minutes after IST midnight. */
+const SESSION_OPEN_MIN = 9 * 60 + 15;
+const SESSION_END_MIN = 15 * 60 + 30;
 
 const ymd = (epochMs: number) => formatIstDateTime(epochMs).slice(0, 10);
 
@@ -71,6 +83,10 @@ export interface PaperTraderDeps {
   pollMs?: number;
   /** Never start (tests that don't exercise paper trading). */
   inactive?: boolean;
+  /** Override MAX_ENTRY_LAG_MS (tests run the market clock fast). */
+  maxEntryLagMs?: number;
+  /** Override REFILL_EVERY_MS (tests). */
+  refillEveryMs?: number;
 }
 
 /**
@@ -82,6 +98,8 @@ export interface PaperTraderDeps {
  */
 export class PaperTrader extends EventEmitter<{ change: [] }> {
   private candles: Candle[] = [];
+  /** When it last asked Kite for missing minutes (real epoch ms). */
+  private lastRefill = 0;
   private seriesId: string | null = null;
   private running = false;
   private starting = false;
@@ -210,7 +228,15 @@ export class PaperTrader extends EventEmitter<{ change: [] }> {
     if (e.series !== this.seriesId) return;
     let c = this.candles;
     if (e.range) c = dropUnconfirmed(c, e.bars, e.range);
-    for (const b of [...e.bars].sort((x, y) => x.time - y.time)) {
+    this.candles = c;
+    this.merge(e.bars);
+    this.queue();
+  }
+
+  /** Puts bars into the held series, replacing bars with the same time. */
+  private merge(bars: readonly Candle[]): void {
+    const c = this.candles;
+    for (const b of [...bars].sort((x, y) => x.time - y.time)) {
       const last = c.at(-1);
       if (!last || b.time > last.time) c.push({ ...b });
       else {
@@ -222,8 +248,53 @@ export class PaperTrader extends EventEmitter<{ change: [] }> {
         }
       }
     }
-    this.candles = c;
-    this.queue();
+  }
+
+  /**
+   * After a stall (the machine asleep, the network down) the live feed's
+   * catch-up resends only its last few bars, which leaves a hole in today's
+   * candles, and a dead feed sends none. Either way, today's missing minutes
+   * are fetched from Kite again (at most once a minute), so the script never
+   * runs on a series with missing bars.
+   */
+  private async refill(nowMs: number): Promise<void> {
+    if (Date.now() - this.lastRefill < (this.deps.refillEveryMs ?? REFILL_EVERY_MS)) return;
+    const dayStart = istStartOfDay(nowMs) / 1000;
+    const open = dayStart + SESSION_OPEN_MIN * 60;
+    const end = dayStart + SESSION_END_MIN * 60;
+    const nowS = Math.floor(nowMs / 1000);
+    const wd = toIstParts(nowMs).weekday;
+    if (wd === 0 || wd === 6 || nowS < open + 60) return;
+    const today = this.candles.filter((c) => c.time >= dayStart && c.time < end);
+    let from: number | null = null;
+    if (!today.length || today[0]!.time > open) from = open;
+    for (let i = 1; from === null && i < today.length; i++)
+      if (today[i]!.time - today[i - 1]!.time > 60) from = today[i - 1]!.time;
+    // Nothing new for three minutes during the session: the feed may be down.
+    const last = today.at(-1)?.time ?? open;
+    if (from === null && nowS < end + 60 && last + 180 < nowS) from = last;
+    if (from === null) return;
+    const session = this.deps.auth.session();
+    const inst = this.deps.instruments.get(PAPER_UNDERLYING);
+    if (!session || !inst) return;
+    this.lastRefill = Date.now();
+    try {
+      const res = await this.deps.history.getSince(
+        session.accessToken,
+        inst,
+        getTimeframe('1m')!,
+        from,
+        { fresh: true, priority: 'low' },
+      );
+      if (!res.candles.length) return; // a holiday
+      this.merge(res.candles);
+      this.deps.log.warn(
+        { from: formatIstDateTime(from * 1000), bars: res.candles.length },
+        'Paper trading: refilled missing minutes from Kite (machine asleep or feed down?)',
+      );
+    } catch (err) {
+      this.deps.log.warn({ msg: toKiteError(err).message }, 'Paper trading: refill failed');
+    }
   }
 
   /** Runs evaluations one at a time. */
@@ -242,6 +313,8 @@ export class PaperTrader extends EventEmitter<{ change: [] }> {
   }
 
   private async evaluate(): Promise<void> {
+    if (!this.running) return;
+    await this.refill(this.deps.clock.now());
     if (!this.running) return;
     const nowMs = this.deps.clock.now();
     const nowS = Math.floor(nowMs / 1000);
@@ -326,6 +399,20 @@ export class PaperTrader extends EventEmitter<{ change: [] }> {
       if (!t) {
         // Only calls made on candles that closed while we were watching.
         if (!fresh.some((a) => a.time === signalTime)) continue;
+        // ...and only while they're fresh: after a stall the price has moved on.
+        const lagMs = nowMs - (signalTime + 60) * 1000;
+        if (lagMs > (this.deps.maxEntryLagMs ?? MAX_ENTRY_LAG_MS)) {
+          const why = `signal candle closed ${Math.round(lagMs / 1000)} s ago (no live candles until now): not entered`;
+          store.addEvent({
+            at: nowMs,
+            barTime: signalTime,
+            tradeId: null,
+            kind: 'MISSED',
+            text: `MISSED|${r.t}|NIFTY ${r.opt}|${why}`,
+          });
+          this.deps.log.warn({ call: r.t, opt: r.opt, lagMs }, 'Paper trading: call missed');
+          continue;
+        }
         t = await this.enter(r, settings, signalTime, nowMs, freshLines);
       }
       if (t.status !== 'open') continue;
@@ -349,8 +436,13 @@ export class PaperTrader extends EventEmitter<{ change: [] }> {
           nowMs,
         );
       }
-      // Trade closed?
+      // Trade closed? (Exits found late are still filled, at the price now.)
       if (r.xT) {
+        const lag = nowMs - (this.rowTime(day, r.xT) + 60) * 1000;
+        if (lag > (this.deps.maxEntryLagMs ?? MAX_ENTRY_LAG_MS))
+          t.notes.push(
+            `exit ${r.xT} filled ${Math.round(lag / 60_000)} min late (no live candles)`,
+          );
         const tags = rowTags(r) ?? ['?', '?'];
         if (!t.lot1) t.lot1 = await this.exitLot(t, r.l1P ?? 0, tags[0], settings, nowMs);
         const l2pts = (r.tot ?? 0) - (r.l1P ?? 0);

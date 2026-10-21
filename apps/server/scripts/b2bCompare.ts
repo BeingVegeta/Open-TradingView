@@ -1,5 +1,5 @@
 /*
- * pnpm b2b:compare — does the N-B2B port reproduce TradingView? See docs/B2B_PARITY.md.
+ * pnpm b2b:compare - does the N-B2B port reproduce TradingView? See docs/B2B_PARITY.md.
  *
  *   pnpm b2b:compare --tv data/tv-nifty-1m.csv
  *   pnpm b2b:compare --tv data/tv.csv --kite data/paper-2026-10-19.json --day 2026-10-19
@@ -61,7 +61,7 @@ const USAGE = `pnpm b2b:compare [--tv FILE] [--kite FILE] [--app-log FILE] [opti
   --tv FILE        TradingView "Export chart data" CSV of NIFTY 1m (with the N-B2B
                    indicator on the chart, its plots are checked bar by bar)
   --kite FILE      Kite candles: CSV, Kite JSON ([ts,o,h,l,c,v] rows) or an app export
-  --app-log FILE   The app's export (/api/paper/export?day=…): live paper trades, and
+  --app-log FILE   The app's export (/api/paper/export?day=...): live paper trades, and
                    its candles if --kite isn't given
   --day YYYY-MM-DD Day to report (default: the newest day in the files)
   --tol N          OHLC difference that counts (default 0.05)
@@ -88,7 +88,7 @@ function load(path: string, label: string): CandleFile {
   const c = f.candles;
   out(
     `${label}: ${path} (${f.format}), ${c.length} bars` +
-      (c.length ? `, ${at(c[0]!.time)} → ${at(c.at(-1)!.time)} IST` : ''),
+      (c.length ? `, ${at(c[0]!.time)} -> ${at(c.at(-1)!.time)} IST` : ''),
   );
   for (const w of f.warnings) out(`  ! ${w}`);
   return f;
@@ -99,6 +99,7 @@ interface AppExport {
   settings?: unknown;
   settingsHash?: string;
   trades?: PaperTrade[];
+  events?: { kind: string; text: string }[];
   candles?: unknown[];
 }
 
@@ -157,6 +158,11 @@ const day =
     .at(-1);
 if (!day) throw new Error('No day to report: the files have no common day');
 out(`Day: ${day}`);
+const kiteHasDay = !kite || kiteDays.has(day);
+const tvHasDay = !tv || tvDays.has(day);
+if (!kiteHasDay) out(`  ! The Kite candles have no bars on ${day} (a holiday?).`);
+if (!tvHasDay) out(`  ! The TradingView file has no bars on ${day}.`);
+if (!kiteHasDay && !tvHasDay) process.exit(0);
 
 const warmupFor = (isTv: boolean): number | null =>
   a.warmup === 'all' ? null : a.warmup ? Number(a.warmup) : isTv || kiteFromApp ? null : APP_WARMUP;
@@ -169,13 +175,13 @@ function printLog(run: ScriptRun, title: string): void {
 
 function describeRun(run: ScriptRun): string {
   const u = run.used;
-  return `${u.length} bars from ${u.length ? at(u[0]!.time) : '–'}${
+  return `${u.length} bars from ${u.length ? at(u[0]!.time) : '-'}${
     run.dropped.length ? `, ${run.dropped.length} closing-print bars dropped` : ''
   }`;
 }
 
 // ---------------------------------------------------------------- TradingView
-if (tv) {
+if (tv && tvHasDay) {
   section('Engine on TradingView candles (as TradingView ran the script)');
   const opts = (pivotTie: PivotTie) => ({
     day: day!,
@@ -197,8 +203,8 @@ if (tv) {
       out(
         `  pivot tie ${r}: ${c.compared} bars compared, ${c.mismatched} differ` +
           (c.first
-            ? ` — first at ${at(c.first.time)}: ${c.first.key} engine ${c.first.engine ?? 'na'} vs TradingView ${c.first.tv ?? 'na'}`
-            : ' — reproduces TradingView on every bar'),
+            ? ` - first at ${at(c.first.time)}: ${c.first.key} engine ${c.first.engine ?? 'na'} vs TradingView ${c.first.tv ?? 'na'}`
+            : ' - reproduces TradingView on every bar'),
       );
     }
     const mine = checkPlots(tvRun.res, tv.plots);
@@ -226,7 +232,7 @@ if (tv) {
 
 // ---------------------------------------------------------------------- Kite
 let kiteRun: ScriptRun | null = null;
-if (kite) {
+if (kite && kiteHasDay) {
   section('Engine on Kite candles (as the app runs it)');
   kiteRun = runScript(kite.candles, {
     day,
@@ -244,30 +250,30 @@ if (kite) {
 }
 
 // ------------------------------------------------------------ TV against Kite
-if (tv && kite) {
-  section('Candles: Kite − TradingView');
+if (tv && kite && tvHasDay && kiteHasDay) {
+  section('Candles: Kite - TradingView');
   const d = diffCandles(tv.candles, kite.candles, day, tol);
   if (!d.range) out('The two files have no bars in common.');
   else {
-    out(`Overlap ${at(d.range[0])} → ${at(d.range[1])}`);
+    out(`Overlap ${at(d.range[0])} -> ${at(d.range[1])}`);
     if (d.onlyA.length)
       out(`  only in TradingView: ${d.onlyA.length} bars, first ${at(d.onlyA[0]!)}`);
     if (d.onlyB.length) out(`  only in Kite: ${d.onlyB.length} bars, first ${at(d.onlyB[0]!)}`);
     const f = d.first;
     out(
       f
-        ? `First bar differing by more than ${tol}: ${at(f.time)} (ΔO ${f.dOpen} ΔH ${f.dHigh} ΔL ${f.dLow} ΔC ${f.dClose})`
+        ? `First bar differing by more than ${tol}: ${at(f.time)} (dO ${f.dOpen} dH ${f.dHigh} dL ${f.dLow} dC ${f.dClose})`
         : `No bar differs by more than ${tol}.`,
     );
     const used = diffCandles(tv.candles, withoutClosingPrints(kite.candles, day), day, tol).first;
     if (used && used.time !== f?.time)
       out(
         `First one among the bars the app uses (closing prints left out): ${at(used.time)} ` +
-          `(ΔO ${used.dOpen} ΔH ${used.dHigh} ΔL ${used.dLow} ΔC ${used.dClose})`,
+          `(dO ${used.dOpen} dH ${used.dHigh} dL ${used.dLow} dC ${used.dClose})`,
       );
     out(`${day}: ${d.day.length} of ${d.dayBars} bars differ by more than ${tol}`);
     const mx = (n: string, b: typeof d.maxHigh, k: 'dHigh' | 'dLow' | 'dClose') =>
-      b && b[k] !== 0 ? `max |Δ${n}| ${Math.abs(b[k])} at ${at(b.time).slice(11)}` : `no Δ${n}`;
+      b && b[k] !== 0 ? `max |d${n}| ${Math.abs(b[k])} at ${at(b.time).slice(11)}` : `no d${n}`;
     out(
       '  ' +
         [
@@ -281,7 +287,7 @@ if (tv && kite) {
     if (list.length)
       out(
         textTable(
-          ['Time', 'ΔOpen', 'ΔHigh', 'ΔLow', 'ΔClose', ''],
+          ['Time', 'dOpen', 'dHigh', 'dLow', 'dClose', ''],
           list.map((x) => [
             at(x.time).slice(11),
             String(x.dOpen),
@@ -293,7 +299,7 @@ if (tv && kite) {
         ),
       );
     if (list.length < d.day.length)
-      out(`  … ${d.day.length - list.length} more (--bars lists all)`);
+      out(`  ... ${d.day.length - list.length} more (--bars lists all)`);
   }
 
   section('Call logs side by side, both runs starting on the same bar');
@@ -345,18 +351,22 @@ if (tv && kite) {
 // ------------------------------------------------------- Kite against live run
 if (appLog && kiteRun) {
   section('Offline run on Kite candles vs what the live paper trader did');
-  const rows = matchApp(kiteRun.res.log, appTrades, day);
+  const missed = new Set(
+    (appLog.events ?? []).filter((e) => e.kind === 'MISSED').map((e) => e.text.split('|')[1] ?? ''),
+  );
+  const onDay = kiteRun.res.lastTime !== null && istDay(kiteRun.res.lastTime) === day;
+  const rows = matchApp(onDay ? kiteRun.res.log : [], appTrades, day, missed);
   if (!rows.length) out('(no calls either way)');
   else
     out(
       textTable(
-        ['In', 'Offline (final candles)', 'Live paper trade', 'Net ₹', 'Flag'],
+        ['In', 'Offline (final candles)', 'Live paper trade', 'Net Rs', 'Flag'],
         rows.map((r) => [
           r.t,
           brief(r.offline),
           r.live
-            ? `${r.live.optionName} @${r.live.entryIndex} → ${r.live.result ?? 'open'} ${r.live.scriptPts ?? ''}`
-            : '—',
+            ? `${r.live.optionName} @${r.live.entryIndex} -> ${r.live.result ?? 'open'} ${r.live.scriptPts === null ? '' : Math.round(r.live.scriptPts * 100) / 100}`
+            : '-',
           r.live?.netRs === null || r.live?.netRs === undefined
             ? ''
             : String(Math.round(r.live.netRs)),
@@ -364,6 +374,6 @@ if (appLog && kiteRun) {
         ]),
       ),
     );
-} else if (appLog && !kiteRun) {
+} else if (appLog && !kite) {
   out('\n(App log given without candles: pass --kite, or use an export that includes candles.)');
 }
