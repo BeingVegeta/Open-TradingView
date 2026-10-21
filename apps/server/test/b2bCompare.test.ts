@@ -7,6 +7,9 @@ import {
   logTable,
   matchApp,
   matchLogs,
+  packDays,
+  pineDiffScript,
+  unpackDay,
   parseCandleFile,
   parseTime,
   runScript,
@@ -217,5 +220,29 @@ describe('log matching', () => {
     expect(m.find((x) => x.t === a[1]!.t)!.flag).toMatch(/RESULT DIFFERS.*notes: call withdrawn/);
     expect(m.find((x) => x.t === a[2]!.t)!.flag).toMatch(/NOT TAKEN LIVE/);
     expect(m.find((x) => x.t === '15:01')!.flag).toMatch(/LIVE ONLY/);
+  });
+});
+
+describe('Pine diff script', () => {
+  const cs = market([15, 16]);
+
+  it("packs Kite's candles losslessly in ticks of 0.05", () => {
+    const [p] = packDays(cs, ['2026-10-16']);
+    expect(p!.bars).toBe(375);
+    expect(p!.chunks.every((c) => c.length <= 1800)).toBe(true);
+    const back = unpackDay(p!.base, p!.chunks);
+    const day = cs.filter((c) => istDay(c.time) === '2026-10-16');
+    day.forEach((c, i) =>
+      expect(back.get(i)).toEqual([c.open, c.high, c.low, c.close].map((x) => Math.round(x * 20))),
+    );
+  });
+
+  it('writes a script with every day and chunk, and refuses a day without candles', () => {
+    const s = pineDiffScript(cs, ['2026-10-15', '2026-10-16']);
+    expect(s.startsWith('//@version=6')).toBe(true);
+    expect(s).toContain('options = ["2026-10-15", "2026-10-16"]');
+    const chunks = packDays(cs, ['2026-10-15', '2026-10-16']).flatMap((p) => p.chunks);
+    for (const c of chunks) expect(s).toContain(`"${c}"`);
+    expect(() => pineDiffScript(cs, ['2026-10-17'])).toThrow(/No Kite candles/);
   });
 });

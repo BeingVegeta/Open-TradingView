@@ -221,6 +221,19 @@ No rule difference other than the tie rule has been found. To settle the last tw
 paid export, read these NIFTY 50 1-minute candles off TradingView: 15-Oct 15:10–15:29, and 16-Oct
 12:52 and 13:32–13:34.
 
+### Getting TradingView's candles without a paid export
+
+A Pine table can show any candle values, and a screenshot of it is all that's needed.
+`pnpm b2b:pine-diff --kite <app export> --days 2026-10-13,2026-10-14` writes a Pine script that
+carries Kite's candles for those days (keep it private: it holds Kite's data). On TradingView's
+NIFTY 50 1-minute chart it lists, for the chosen day and page, every bar whose open, high, low
+or close differs from Kite's, in ticks of 0.05 (TradingView − Kite), plus bars only one side
+has. TradingView's candles are then Kite's plus those differences.
+
+First result (16 bars on 15–16 Oct, read with a simpler table): every high and low matched;
+TradingView's open usually equals Kite's previous close (10 of 16), and closes differed by up to
+0.5 in 10 of 16. On 15-Oct TradingView has no bars at all from 15:15 to 15:29.
+
 ## Results
 
 _Not yet run._ Fill in from the tool's output:
