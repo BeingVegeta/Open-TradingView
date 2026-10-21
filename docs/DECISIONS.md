@@ -119,11 +119,11 @@ user's exchange and broker notices show SEBI's closing auction session (CAS):
   only on a 1m chart. It starts from about 5,000 bars of history, while TradingView may start
   further back, so zones carried over from older history can differ near the start of the data.
   Calls on the current day should not depend on it.
-- Pivot ties: Pine's `ta.pivothigh`/`pivotlow` tie handling isn't documented. The port takes a
-  pivot when the bars to its left are strictly higher (lower for highs) and the bars to its right
-  are not lower, so the older of two equal extremes wins. PyneCore's implementation does the
-  opposite (the newer one wins). The default stays until a Pine test or a TradingView export
-  confirms one; `pivotTie: 'newer'` runs the other rule. See [B2B_PARITY.md](B2B_PARITY.md).
+- Pivot ties: Pine's reference doesn't say which of two equal highs (lows) `ta.pivothigh`
+  (`pivotlow`) reports. The port first took the older one; a test on TradingView
+  (`docs/pine/pivot_tie_test.pine`, 21-Oct-2026) showed Pine takes the newer one, as PyneCore's
+  implementation does, and the engine now matches. `pivotTie: 'older'` keeps the old rule for
+  comparisons. See [B2B_PARITY.md](B2B_PARITY.md).
 - `ta.atr` is an RMA of the true range seeded with a simple average, as in Pine. Labels are capped
   at 300, like the script's `max_labels_count`.
 - The script's settings are saved with the layout on the server. The paper trader reads the same

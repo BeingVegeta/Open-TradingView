@@ -108,7 +108,7 @@ describe('paper trading (mock market at 60x)', { timeout: 60_000 }, () => {
       warmup: null,
       trim: true,
       settings: B2B_DEFAULTS,
-      pivotTie: 'older',
+      pivotTie: 'newer',
     });
     const row = matchApp(replay.res.log, ex.trades, '2026-10-16').find((r) => r.live?.id === t!.id);
     expect(row!.offline).toBeDefined();

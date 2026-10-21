@@ -50,7 +50,7 @@ const { values: a } = parseArgs({
     tol: { type: 'string', default: '0.05' },
     warmup: { type: 'string' },
     settings: { type: 'string' },
-    'pivot-tie': { type: 'string', default: 'older' },
+    'pivot-tie': { type: 'string', default: 'newer' },
     bars: { type: 'boolean', default: false },
     help: { type: 'boolean', default: false },
   },
@@ -70,7 +70,7 @@ const USAGE = `pnpm b2b:compare [--tv FILE] [--kite FILE] [--app-log FILE] [opti
   --settings X     JSON file or inline JSON of script inputs, or "app" for the export's
                    (default: the script's defaults)
   --pivot-tie T    older | newer: which of two equal highs/lows is the swing point
-                   (default older, the app's current rule)
+                   (default newer, as Pine; older is the app's rule before 21-Oct-2026)
   --bars           List every differing bar of the day, not just the first 40`;
 
 if (a.help || (!a.tv && !a.kite && !a['app-log'])) {

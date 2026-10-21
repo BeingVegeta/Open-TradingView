@@ -1,5 +1,6 @@
 import { EventEmitter } from 'node:events';
 import {
+  B2B_ENGINE_REV,
   dropClosingPrints,
   dropUnconfirmed,
   formatIstDateTime,
@@ -39,9 +40,10 @@ const FILL_WAIT_MS = 3000;
 const ymd = (epochMs: number) => formatIstDateTime(epochMs).slice(0, 10);
 
 /** 32-bit FNV-1a, as 8 hex digits: identifies a settings version. */
+/** Fingerprint of the script inputs and the engine version a trade was made with. */
 export function settingsHash(s: B2BSettings): string {
   let h = 0x811c9dc5;
-  for (const ch of JSON.stringify(s)) {
+  for (const ch of `${JSON.stringify(s)}|rev${B2B_ENGINE_REV}`) {
     h ^= ch.charCodeAt(0);
     h = Math.imul(h, 0x01000193) >>> 0;
   }

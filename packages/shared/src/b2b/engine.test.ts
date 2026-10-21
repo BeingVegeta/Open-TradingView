@@ -289,14 +289,16 @@ describe('pivot ties', () => {
       (p.confirmedAt - T0) / 60,
     ]);
 
-  it("takes the older of equal highs and lows by default (the port's original reading)", () => {
-    expect(pivots(highs)).toEqual([['high', 5, 10]]);
-    expect(pivots(lows)).toEqual([['low', 5, 10]]);
+  it('takes the newer of equal highs and lows by default, as Pine does', () => {
+    // TradingView, docs/pine/pivot_tie_test.pine: newer bar 480 / 479, older bar 0.
+    expect(pivots(highs)).toEqual([['high', 6, 11]]);
+    expect(pivots(lows)).toEqual([['low', 6, 11]]);
+    expect(pivots(highs, 'newer')).toEqual(pivots(highs));
   });
 
-  it("takes the newer one with pivotTie 'newer' (PyneCore's ta.pivothigh/pivotlow)", () => {
-    expect(pivots(highs, 'newer')).toEqual([['high', 6, 11]]);
-    expect(pivots(lows, 'newer')).toEqual([['low', 6, 11]]);
+  it("takes the older one with pivotTie 'older' (the port's original reading)", () => {
+    expect(pivots(highs, 'older')).toEqual([['high', 5, 10]]);
+    expect(pivots(lows, 'older')).toEqual([['low', 5, 10]]);
   });
 });
 

@@ -91,12 +91,19 @@ export interface B2BPivot {
 
 /**
  * Which of two equal highs (or lows) inside the pivot window becomes the pivot.
- * Pine's reference doesn't say. 'older': the left side must be strictly lower
- * and the right side may tie (this port's original reading). 'newer': the left
- * side may tie and the right side must be strictly lower (PyneCore's
- * implementation of ta.pivothigh). See docs/B2B_PARITY.md.
+ * 'newer' (Pine's behaviour, confirmed on TradingView with
+ * docs/pine/pivot_tie_test.pine on 21-Oct-2026): the left side may tie and the
+ * right side must be strictly lower (higher for lows). 'older' is this port's
+ * original, wrong reading, kept for parity diagnostics. See docs/B2B_PARITY.md.
  */
 export type PivotTie = 'older' | 'newer';
+
+/**
+ * Changes whenever the engine's behaviour changes for the same settings, so
+ * paper trades made by different engine versions can be told apart.
+ * 2: swing-point ties go to the newer bar, as in Pine.
+ */
+export const B2B_ENGINE_REV = 2;
 
 export interface B2BState {
   pos: 0 | 1 | -1;
@@ -236,7 +243,7 @@ export interface B2BOptions {
   formingIndex?: number;
   /** Bar length in seconds (60 on the 1-minute chart). */
   barSeconds?: number;
-  /** Tie rule for swing highs and lows (default 'older'). */
+  /** Tie rule for swing highs and lows (default 'newer', as Pine). */
   pivotTie?: PivotTie;
 }
 
@@ -245,7 +252,7 @@ export function runB2B(candles: readonly Candle[], opts: B2BOptions): B2BResult 
   const S = opts.settings;
   const barS = opts.barSeconds ?? 60;
   const forming = opts.formingIndex ?? -1;
-  const newerTie = opts.pivotTie === 'newer';
+  const newerTie = opts.pivotTie !== 'older';
   const pivots: B2BPivot[] = [];
   const m = S.measure === 'points' ? 1 : S.deltaF;
   const mName = S.measure === 'points' ? 'index pts' : 'premium pts (est.)';

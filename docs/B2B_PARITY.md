@@ -4,9 +4,10 @@ The app runs a TypeScript port of Varun's "NIFTY 2-Lot Block-to-Block v1.8" Pine
 (`packages/shared/src/b2b/engine.ts`). On 16-Oct-2026 its call log differed from TradingView's.
 This page records what is known, the tools that settle the rest, and how to read their output.
 
-**Status (19-Oct-2026): the tools are built, but the verdict is pending.** It needs a TradingView
-export and an app export (steps 2–3 below). Nothing in the Results section is filled in until
-those files have been run.
+**Status (21-Oct-2026): one translation bug found and fixed; the full check is pending.** The
+Pine tie test showed the port picked the wrong bar when two swing highs or lows tie (below). The
+engine now follows Pine. Whether everything else matches bar by bar still needs a TradingView
+export and an app export (steps 2–3 below).
 
 ## What is established
 
@@ -55,24 +56,29 @@ point at 15:23–15:24 can't be confirmed, because the five bars after it are cu
 **Open question:** on 15-Oct, Kite's NIFTY is flat from about 15:14 to 15:25. TradingView's 15-Oct
 chart hasn't been checked for the same stretch.
 
-### Swing-point ties: the port and PyneCore disagree
+### Swing-point ties: the port had it backwards (fixed 21-Oct)
 
 The script finds swings with `ta.pivothigh(high, 5, 5)` and `ta.pivotlow(low, 5, 5)`. TradingView's
 reference doesn't say what happens when the candidate bar ties with another bar in its window.
 
-- **The engine (default `pivotTie: 'older'`):** the left side must be strictly lower and the right
-  side may tie. Of two equal highs, the **older** one is the pivot.
-- **[PyneCore](https://github.com/PyneSys/pynecore)**, a Python reimplementation of Pine that
-  checks its functions against TradingView's output: `pivothigh` calls `highest(…, _check_eq=True)`,
-  documented as "Keep the NEWEST of equal extremes (pivot detection)". A pivot fires only when the
-  candidate is the newest maximum in the window, so the left side may tie and the right side must
-  be strictly lower. Of two equal highs, the **newer** one is the pivot.
+- **The port until 21-Oct (`pivotTie: 'older'`):** the left side had to be strictly lower and the
+  right side could tie, so of two equal highs the **older** one was the pivot.
+- **[PyneCore](https://github.com/PyneSys/pynecore)**, a Python reimplementation of Pine:
+  `pivothigh` calls `highest(…, _check_eq=True)`, documented as "Keep the NEWEST of equal extremes
+  (pivot detection)". The left side may tie and the right side must be strictly lower, so of two
+  equal highs the **newer** one is the pivot.
+- **TradingView itself** ([the tie test](pine/pivot_tie_test.pine), run 21-Oct): `pivothigh`
+  reported the newer bar 480 times and the older bar 0 times; `pivotlow` 479 and 0. **Pine keeps
+  the newer of equal extremes.**
 
-These are opposite rules. They place a swing point on a different bar wherever two highs or lows
-tie, which is common on NIFTY 1m, where prices move in 0.05 steps and sometimes go flat. PyneCore's
-code is evidence, not confirmation: its tie rule isn't one of its documented "measured" behaviours.
-So the engine's default is unchanged. `runB2B(…, { pivotTie: 'newer' })` and
-`pnpm b2b:compare --pivot-tie newer` run the other rule.
+The engine's default is now `'newer'`, in the dashboard and the paper trader alike. Ties are common
+on NIFTY 1m (0.05 steps, flat stretches), so the old rule moved swing points, and with them zones
+and calls. `pivotTie: 'older'` and `pnpm b2b:compare --pivot-tie older` still run the old rule, to
+see what it changed.
+
+Paper trades record a fingerprint of the settings and the engine version (`B2B_ENGINE_REV`, now 2),
+so the Paper tab's breakdown by settings version separates trades made before the fix (19–21 Oct)
+from those after.
 
 ## How to settle it
 
@@ -84,12 +90,14 @@ It feeds a repeating pattern with one pair of equal highs and one pair of equal 
 `ta.pivothigh(src, 5, 5)` and `ta.pivotlow(src, 5, 5)`, and its table counts which bar of each pair
 was reported:
 
-| Table shows              | Meaning                                     |
-| ------------------------ | ------------------------------------------- |
-| counts under "older bar" | the engine's current rule is right          |
-| counts under "newer bar" | PyneCore's rule is right: switch to 'newer' |
-| counts under both        | ties never block a pivot (a third rule)     |
-| zeros in both            | ties always block a pivot (a fourth rule)   |
+| Table shows              | Meaning                                   |
+| ------------------------ | ----------------------------------------- |
+| counts under "older bar" | the port's original rule ('older')        |
+| counts under "newer bar" | PyneCore's rule ('newer'): the result     |
+| counts under both        | ties never block a pivot (a third rule)   |
+| zeros in both            | ties always block a pivot (a fourth rule) |
+
+Result on 21-Oct: newer bar 480 / 479, older bar 0 / 0, other 0 / 0.
 
 ### 2. TradingView export
 
@@ -158,12 +166,10 @@ The output has these sections:
 
 The verdict comes from the "Bar-by-bar check" line of section 1:
 
-- **`pivot tie older: … 0 differ`:** the port reproduces TradingView exactly on TradingView's
-  candles. Every remaining difference comes from the data (sections 3 and 4).
-- **`pivot tie newer: … 0 differ` and `older` doesn't:** Pine keeps the newer of equal extremes.
-  Change the default to `'newer'`. It's a one-line change, and the tie test in step 1 should
-  agree.
-- **Neither is 0:** a translation bug. The tool prints `FIRST DIVERGING BAR` and the engine's
+- **`pivot tie newer: … 0 differ`:** the port reproduces TradingView exactly on TradingView's
+  candles. Every remaining difference comes from the data (sections 3 and 4). The `older` line
+  shows how many bars the old tie rule got wrong.
+- **`newer` isn't 0:** another translation bug. The tool prints `FIRST DIVERGING BAR` and the engine's
   state on that bar. That bar and state are what's needed to find the bug. Don't adjust anything
   else until it's understood.
 
@@ -175,7 +181,8 @@ _Not yet run._ Fill in from the tool's output:
 | --- | ---- | --------- | ------------------------------ | ------------------- | ------------------------------ |
 |     |      |           |                                |                     |                                |
 
-Pine tie test: _not yet run._
+Pine tie test (21-Oct-2026): `pivothigh` newer bar 480, older bar 0; `pivotlow` newer bar 479,
+older bar 0. Pine keeps the newer of equal extremes; the engine's default was switched to match.
 
 ## What the two "Net" figures mean
 
