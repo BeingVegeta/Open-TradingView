@@ -19,7 +19,8 @@
     "test:watch": "vitest",
     "check": "pnpm lint && pnpm format:check && pnpm typecheck && pnpm test",
     "b2b:compare": "tsx apps/server/scripts/b2bCompare.ts",
-    "b2b:pine-diff": "tsx apps/server/scripts/b2bPineDiff.ts"
+    "b2b:pine-diff": "tsx apps/server/scripts/b2bPineDiff.ts",
+    "b2b:backtest": "tsx apps/server/scripts/b2bBacktest.ts"
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",

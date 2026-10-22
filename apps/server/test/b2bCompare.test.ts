@@ -53,6 +53,7 @@ describe('parseTime', () => {
     expect(parseTime('2026-10-16T09:15:00+05:30')).toBe(t);
     expect(parseTime('2026-10-16T09:15:00+0530')).toBe(t); // Kite
     expect(parseTime('2026-10-16 09:15:00')).toBe(t);
+    expect(parseTime('2026-10-16 03:45:00+00')).toBe(t); // UTC written as +00
     expect(() => parseTime('yesterday')).toThrow(/Unreadable/);
   });
 });

@@ -59,6 +59,8 @@ export function parseTime(v: string | number): number {
   }
   let s = v.trim().replace(' ', 'T');
   s = s.replace(/([+-]\d\d)(\d\d)$/, '$1:$2');
+  // "+00" after a time (UTC, as some CSV exports write it); not a date's "-22".
+  s = s.replace(/(T\d\d:\d\d(?::\d\d(?:\.\d+)?)?)([+-]\d\d)$/, '$1$2:00');
   if (!/(Z|[+-]\d\d:\d\d)$/i.test(s)) s += '+05:30';
   const ms = Date.parse(s);
   if (Number.isNaN(ms)) throw new Error(`Unreadable time: ${v}`);

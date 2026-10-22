@@ -270,6 +270,12 @@ it off again.
 app (`/api/paper/export?day=…`), and compares candles, the script's plots bar by bar and the
 call logs. See [docs/B2B_PARITY.md](docs/B2B_PARITY.md).
 
+`pnpm b2b:backtest --csv <1-minute candles>` runs the script over every day in a candle file
+(Kite JSON, an app export or a CSV such as XAU/USD) and prints the results, by month and by kind
+of exit. `--settings` overrides inputs (times of day in IST, not limited to NIFTY's hours),
+`--scale auto` sizes the point settings to another market's typical 1-minute range, and `--cost`
+takes spread and charges off every trade. `pnpm b2b:backtest --help` lists the options.
+
 ### Layout
 
 ```
